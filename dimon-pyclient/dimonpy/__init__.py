@@ -10,11 +10,17 @@ import requests
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
 class DimonRESTBase(object):
-    def __init__(self, host, port):
+    def __init__(self, host, http_port, **kwargs):
         # TODO: Sanintize
         self.host = host
-        self.port = port
-        self.base_url = "http://%s:%s/dimon/v%s" % (host, port, __api__)
+        self.http_port = http_port
+        self.base_url = "http://%s:%s/dimon/v%s" % (host, http_port, __api__)
+        try:
+            self._parse_args(**kwargs)
+        except KeyError:
+            logging.error(self.parse_err)
+            raise RuntimeError
+        self._update_url()
 
     def _r(self, req_type, url, timeout = None, raise_error = True):
         try:
@@ -65,19 +71,14 @@ class DimonRESTBase(object):
 
 
 class DimonPID(DimonRESTBase):
-    def __init__(self, host, port, **kwargs):
-        DimonRESTBase.__init__(self, host, port)
-        try:
-            self._parse_args(**kwargs)
-        except KeyError:
-            logging.error("DimonPID: Invalid arguments, excepts pid and pid >= 0 .")
-            raise RuntimeError
-        self._update_url()
+    def __init__(self, host, http_port, **kwargs):
+        DimonRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
         self.pid = int(kwargs['pid'])
         if (self.pid <= 0):
+            self.parse_err = "DimonPID: Invalid arguments, excepts pid and pid >= 0 ."
             raise KeyError
 
     def _update_url(self):
@@ -86,17 +87,11 @@ class DimonPID(DimonRESTBase):
         self.post_url = self.get_url
 
 class DimonHost(DimonRESTBase):
-    def __init__(self, host, port, **kwargs):
-        DimonRESTBase.__init__(self, host, port)
-        try:
-            self._parse_args(**kwargs)
-        except KeyError:
-            logging.error("DimonHost: Invalid arguments")
-            return False
-        self._update_url()
-        return True
+    def __init__(self, host, http_port, **kwargs):
+        DimonRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
+        self.parse_err = ""
         pass
 
     def _update_url(self):
@@ -106,22 +101,15 @@ class DimonHost(DimonRESTBase):
 
 
 class DimonLatency(DimonRESTBase):
-    def __init__(self, host, port, **kwargs):
-        DimonRESTBase.__init__(self, host, port)
-        self.__host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
-        self.__ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
-        try:
-            self._parse_args(**kwargs)
-        except KeyError:
-            logging.error("DimonLatency: Invalid arguments, excepts valid `target` hostname or address")
-            return False
-        self._update_url()
-        return True
+    def __init__(self, host, http_port, **kwargs):
+        DimonRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
-        # TODO: Should we throw another exception?
+        __host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
+        __ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         self.target = kwargs['target']
-        if not (self.__host_regex.match(self.target) or self.__ip_regex.match(self.target)):
+        if not (__host_regex.match(self.target) or __ip_regex.match(self.target)):
+            self.parse_err = "DimonLatency: Invalid arguments, excepts valid `target` hostname or address"
             raise KeyError
 
     def _update_url(self):
@@ -131,21 +119,16 @@ class DimonLatency(DimonRESTBase):
 
 
 class DimonSocket(DimonRESTBase):
-    def __init__(self, host, port, **kwargs):
-        DimonRESTBase.__init__(self, host, port)
-        try:
-            self._parse_args(**kwargs)
-        except KeyError:
-            logging.error("DimonSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid sport ")
-            raise RuntimeError
-        self._update_url()
+    def __init__(self, host, http_port, **kwargs):
+        DimonRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
         self.proto = kwargs['proto']
         self.direction = kwargs['direction']
-        self.port = int(kwargs['sport'])
+        self.port = int(kwargs['port'])
         if (self.port <= 0) or (not self.proto in ['tcp', 'udp']) or (not self.direction in ['bi', 'src', 'dst']):
+            self.parse_err = "DimonSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid port "
             raise KeyError
 
     def _update_url(self):
