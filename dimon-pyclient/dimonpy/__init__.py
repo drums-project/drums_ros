@@ -4,6 +4,7 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
+import re
 import logging
 import requests
 
@@ -69,8 +70,10 @@ class DimonPID(DimonRESTBase):
         try:
             self._parse_args(**kwargs)
         except KeyError:
-            logging.error("DimonClientPID: Invalid arguments, excepts pid and pid >= 0 .")
+            logging.error("DimonPID: Invalid arguments, excepts pid and pid >= 0 .")
+            return False
         self._update_url()
+        return True
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
@@ -81,4 +84,41 @@ class DimonPID(DimonRESTBase):
     def _update_url(self):
         self.url = self.base_url + '/monitor/pid/%s' % self.pid
 
+class DimonHost(DimonRESTBase):
+    def __init__(self, host, port, **kwargs):
+        DimonRESTBase.__init__(self, host, port)
+        try:
+            self._parse_args(**kwargs)
+        except KeyError:
+            logging.error("DimonHost: Invalid arguments")
+            return False
+        self._update_url()
+        return True
 
+    def _parse_args(self, **kwargs):
+        pass
+
+    def _update_url(self):
+        self.url = self.base_url + '/monitor/host'
+
+class DimonLatency(DimonRESTBase):
+    def __init__(self, host, port, **kwargs):
+        DimonRESTBase.__init__(self, host, port)
+        self.__host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
+        self.__ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+        try:
+            self._parse_args(**kwargs)
+        except KeyError:
+            logging.error("DimonLatency: Invalid arguments, excepts valid `target` hostname or address")
+            return False
+        self._update_url()
+        return True
+
+    def _parse_args(self, **kwargs):
+        # TODO: Should we throw another exception?
+        self.target = kwargs['target']
+        if not (self.__host_regex.match(self.target) or self.__ip_regex.match(self.target)):
+            raise KeyError
+
+    def _update_url(self):
+        self.url = self.base_url + '/monitor/latency/%s' % self.target
