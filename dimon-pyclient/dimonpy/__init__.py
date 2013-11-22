@@ -49,13 +49,13 @@ class DimonRESTBase(object):
         return self._r('get', self.base_url + '/info')
 
     def get(self, path = "", timeout = None, raise_error = True):
-        return self._r('get', self.url + path)
+        return self._r('get', self.get_url + path)
 
     def start_monitor(self, timeout = None, raise_error = True):
-        return self._r('post', self.url)
+        return self._r('post', self.post_url)
 
     def stop_monitor(self, timeout = None, raise_error = True):
-        return self._r('delete', self.url)
+        return self._r('delete', self.del_url)
 
     def _parse_args(self, **kwargs):
         raise NotImplementedError
@@ -71,9 +71,8 @@ class DimonPID(DimonRESTBase):
             self._parse_args(**kwargs)
         except KeyError:
             logging.error("DimonPID: Invalid arguments, excepts pid and pid >= 0 .")
-            return False
+            raise RuntimeError
         self._update_url()
-        return True
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
@@ -82,7 +81,9 @@ class DimonPID(DimonRESTBase):
             raise KeyError
 
     def _update_url(self):
-        self.url = self.base_url + '/monitor/pid/%s' % self.pid
+        self.get_url = self.base_url + '/monitor/pid/%s' % self.pid
+        self.del_url = self.get_url
+        self.post_url = self.get_url
 
 class DimonHost(DimonRESTBase):
     def __init__(self, host, port, **kwargs):
@@ -99,7 +100,10 @@ class DimonHost(DimonRESTBase):
         pass
 
     def _update_url(self):
-        self.url = self.base_url + '/monitor/host'
+        self.get_url = self.base_url + '/monitor/host'
+        self.del_url = self.get_url
+        self.post_url = self.get_url
+
 
 class DimonLatency(DimonRESTBase):
     def __init__(self, host, port, **kwargs):
@@ -121,4 +125,30 @@ class DimonLatency(DimonRESTBase):
             raise KeyError
 
     def _update_url(self):
-        self.url = self.base_url + '/monitor/latency/%s' % self.target
+        self.get_url = self.base_url + '/monitor/latency/%s' % self.target
+        self.del_url = self.get_url
+        self.post_url = self.get_url
+
+
+class DimonSocket(DimonRESTBase):
+    def __init__(self, host, port, **kwargs):
+        DimonRESTBase.__init__(self, host, port)
+        try:
+            self._parse_args(**kwargs)
+        except KeyError:
+            logging.error("DimonSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid sport ")
+            raise RuntimeError
+        self._update_url()
+
+    def _parse_args(self, **kwargs):
+        # TODO: Should we throw another exception?
+        self.proto = kwargs['proto']
+        self.direction = kwargs['direction']
+        self.port = int(kwargs['sport'])
+        if (self.port <= 0) or (not self.proto in ['tcp', 'udp']) or (not self.direction in ['bi', 'src', 'dst']):
+            raise KeyError
+
+    def _update_url(self):
+        self.get_url = self.base_url + '/monitor/socket'
+        self.post_url = self.get_url + '/%s/%s/%s' % (self.proto, self.direction, self.port)
+        self.del_url = self.post_url
