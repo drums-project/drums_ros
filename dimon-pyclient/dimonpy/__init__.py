@@ -4,9 +4,18 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
+import sys
 import re
 import logging
 import requests
+import zmq
+import msgpack
+
+from multiprocessing import Process
+from multiprocessing import Queue, Event
+from Queue import Empty, Full
+
+
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
 class DimonRESTBase(object):
@@ -21,6 +30,10 @@ class DimonRESTBase(object):
             logging.error(self.parse_err)
             raise RuntimeError
         self._update_url()
+
+        self.async_running = False
+        self.async_process = None
+        self.data_queue = Queue()
 
     def _r(self, req_type, url, timeout = None, raise_error = True):
         try:
@@ -63,11 +76,56 @@ class DimonRESTBase(object):
     def stop_monitor(self, timeout = None, raise_error = True):
         return self._r('delete', self.del_url)
 
+    def register_callback(self, callback):
+        if not self.async_running:
+            self._async_init()
+        pass
+        #msg = ('eva', 8002, self.callback_queue, callback, )
+        #self.push_socket.send('eva', 8002, msg)
+
     def _parse_args(self, **kwargs):
         raise NotImplementedError
 
     def _get_partial_url(self):
         raise NotImplementedError
+
+    def _get_subscription_key(self):
+        raise NotImplementedError
+
+    def _async_init(self):
+        print "Trying to determine the 0mq publisher endpoint"
+        try:
+            zmq_endpoint = self.get_info()['zmq_publish']
+        except KeyError:
+            print "Key error"
+            return False
+        except:
+            logging.error("Error getting publisher information.")
+            return False
+
+        sub_key = self._get_subscription_key()
+        print "Trying to connect to subscribe to %s with key %s" % (zmq_endpoint, sub_key)
+
+        self.async_process = Process(target = self._async_loop, args = (zmq_endpoint, sub_key, self.data_queue,))
+        self.async_process.start()
+        return True
+
+
+    # This runs in a seperate context
+    def _async_loop(self, endpoint, sub_key, q):
+        try:
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.SUB)
+            sock.setsockopt('SUBSCRIBE', sub_key)
+            sock.connect(endpoint)
+        except:
+            logging.error("0mq err")
+
+        while True:
+            msgs = sock.recv_multipart()
+            # Still compressed
+            assert msgs[0] == sub_key
+            q.put(msgs[1])
 
 
 class DimonPID(DimonRESTBase):

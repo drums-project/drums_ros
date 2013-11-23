@@ -31,7 +31,7 @@ setup(
     packages = [],
     url = 'TODO',
     license = 'LICENSE',
-    install_requires = ['requests'],
+    install_requires = ['requests', 'zmq', 'msgpack'],
     description = 'TODO',
     scripts = [],
     test_suite = ''
