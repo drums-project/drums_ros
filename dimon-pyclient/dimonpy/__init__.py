@@ -8,14 +8,58 @@ import sys
 import re
 import logging
 import requests
-import zmq
+import zmq.green as zmq
+from gevent import spawn
 import msgpack
 
 from multiprocessing import Process
 from multiprocessing import Queue, Event
 from Queue import Empty, Full
 
+# Python does not provide a clean way to create signelton objects
+# All ASync stuff are part of the module namespace directly.
 
+
+__subs = dict()
+
+# Pseudo-thread
+def sub_greenlet(endpoint, sub_key, callback):
+    print "Init for %s %s %s" % (endpoint, sub_key, callback)
+    ctx = zmq.Context
+    sock = zmq.socket(zmq.SUB)
+    sock.setsockopt(zmq.SUBSCRIBE, sub_key)
+    sock.connect(endpoint)
+    while True:
+        print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
+        # non-blocking
+        msgs = sock.recv_multipart()
+        assert msgs[0] == sub_key
+        print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
+        callback(msgpack.loads(msgs[1]))
+
+    print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
+
+def subscribe(endpoint, sub_key, callback):
+    if sub_key in __subs:
+        logging.error("Only one callback for %s is allowed. Skipping." % sub_key)
+        return None
+    else:
+        g = spawn(sub_greenlet, endpoint, sub_key, callback)
+        self.subs[sub_key] = g
+        return g
+
+def unsubscribe(sub_key):
+    try:
+        __subs[sub_key].kill()
+        del __subs[sub_key]
+        return True
+    except KeyError:
+        logging.error("Subscribtion Key %s not found." % sub_key)
+        return False
+
+def shutdown:
+    for sub_key, glet in __subs:
+        unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
 class DimonRESTBase(object):
@@ -31,9 +75,8 @@ class DimonRESTBase(object):
             raise RuntimeError
         self._update_url()
 
-        self.async_running = False
-        self.async_process = None
-        self.data_queue = Queue()
+        self.async_greenlet = None
+        self.async_key = None
 
     def _r(self, req_type, url, timeout = None, raise_error = True):
         try:
@@ -77,22 +120,6 @@ class DimonRESTBase(object):
         return self._r('delete', self.del_url)
 
     def register_callback(self, callback):
-        if not self.async_running:
-            self._async_init()
-        pass
-        #msg = ('eva', 8002, self.callback_queue, callback, )
-        #self.push_socket.send('eva', 8002, msg)
-
-    def _parse_args(self, **kwargs):
-        raise NotImplementedError
-
-    def _get_partial_url(self):
-        raise NotImplementedError
-
-    def _get_subscription_key(self):
-        raise NotImplementedError
-
-    def _async_init(self):
         print "Trying to determine the 0mq publisher endpoint"
         try:
             zmq_endpoint = self.get_info()['zmq_publish']
@@ -103,30 +130,31 @@ class DimonRESTBase(object):
             logging.error("Error getting publisher information.")
             return False
 
-        sub_key = self._get_subscription_key()
+        self.async_key = self._get_subscription_key()
         print "Trying to connect to subscribe to %s with key %s" % (zmq_endpoint, sub_key)
 
-        self.async_process = Process(target = self._async_loop, args = (zmq_endpoint, sub_key, self.data_queue,))
-        self.async_process.start()
-        return True
 
+        self.async_greenlet = subscribe(zmq_endpoint, sub_key, callback)
+        return self.async_greenlet != None
 
-    # This runs in a seperate context
-    def _async_loop(self, endpoint, sub_key, q):
-        try:
-            ctx = zmq.Context()
-            sock = ctx.socket(zmq.SUB)
-            sock.setsockopt('SUBSCRIBE', sub_key)
-            sock.connect(endpoint)
-        except:
-            logging.error("0mq err")
+    def unregister_callback(self):
+        if not self.async_greenlet:
+            logging.error("No async subscriber is running for %s" % self)
+            return False
+        if self.async_key:
+            return unsubscribe(self.async_key)
+        else:
+            logging.error("Something is wrong in async module of %s" % self)
+            return False
 
-        while True:
-            msgs = sock.recv_multipart()
-            # Still compressed
-            assert msgs[0] == sub_key
-            q.put(msgs[1])
+    def _parse_args(self, **kwargs):
+        raise NotImplementedError
 
+    def _get_partial_url(self):
+        raise NotImplementedError
+
+    def _get_subscription_key(self):
+        raise NotImplementedError
 
 class DimonPID(DimonRESTBase):
     def __init__(self, host, http_port, **kwargs):
@@ -144,6 +172,9 @@ class DimonPID(DimonRESTBase):
         self.del_url = self.get_url
         self.post_url = self.get_url
 
+    def _get_subscription_key(self):
+        return "%s:%s:%s" % (self.host, 'pid', self.pid)
+
 class DimonHost(DimonRESTBase):
     def __init__(self, host, http_port, **kwargs):
         DimonRESTBase.__init__(self, host, http_port, **kwargs)
@@ -156,6 +187,9 @@ class DimonHost(DimonRESTBase):
         self.get_url = self.base_url + '/monitor/host'
         self.del_url = self.get_url
         self.post_url = self.get_url
+
+    def _get_subscription_key(self):
+        return "%s:%s:%s" % (self.host, 'host', 'host')
 
 
 class DimonLatency(DimonRESTBase):
@@ -175,6 +209,8 @@ class DimonLatency(DimonRESTBase):
         self.del_url = self.get_url
         self.post_url = self.get_url
 
+    def _get_subscription_key(self):
+        return "%s:%s:%s" % (self.host, 'latency', self.target)
 
 class DimonSocket(DimonRESTBase):
     def __init__(self, host, http_port, **kwargs):
@@ -193,3 +229,6 @@ class DimonSocket(DimonRESTBase):
         self.get_url = self.base_url + '/monitor/socket'
         self.post_url = self.get_url + '/%s/%s/%s' % (self.proto, self.direction, self.port)
         self.del_url = self.post_url
+
+    def _get_subscription_key(self):
+        return "%s:%s:%s" % (self.host, 'socket', 'socket')
