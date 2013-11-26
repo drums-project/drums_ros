@@ -25,8 +25,8 @@ __subs = dict()
 # Pseudo-thread
 def sub_greenlet(endpoint, sub_key, callback):
     print "Init for %s %s %s" % (endpoint, sub_key, callback)
-    ctx = zmq.Context
-    sock = zmq.socket(zmq.SUB)
+    ctx = zmq.Context()
+    sock = ctx.socket(zmq.SUB)
     sock.setsockopt(zmq.SUBSCRIBE, sub_key)
     sock.connect(endpoint)
     while True:
@@ -45,7 +45,7 @@ def subscribe(endpoint, sub_key, callback):
         return None
     else:
         g = spawn(sub_greenlet, endpoint, sub_key, callback)
-        self.subs[sub_key] = g
+        __subs[sub_key] = g
         return g
 
 def unsubscribe(sub_key):
@@ -57,7 +57,7 @@ def unsubscribe(sub_key):
         logging.error("Subscribtion Key %s not found." % sub_key)
         return False
 
-def shutdown:
+def killall():
     for sub_key, glet in __subs:
         unsubscribe(sub_key)
 
@@ -131,10 +131,9 @@ class DimonRESTBase(object):
             return False
 
         self.async_key = self._get_subscription_key()
-        print "Trying to connect to subscribe to %s with key %s" % (zmq_endpoint, sub_key)
+        print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
 
-
-        self.async_greenlet = subscribe(zmq_endpoint, sub_key, callback)
+        self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback)
         return self.async_greenlet != None
 
     def unregister_callback(self):
