@@ -17,6 +17,9 @@ import msgpack
 __subs = dict()
 
 # Pseudo-thread
+# TODO: Instead of directly calling the callbacks, put results in a queue
+# and let the spin function call the callbacks
+
 def sub_greenlet(endpoint, sub_key, callback):
     #print "Init for %s %s %s" % (endpoint, sub_key, callback)
     ctx = zmq.Context()
