@@ -4,7 +4,6 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
-import sys
 import re
 import logging
 import requests
@@ -12,32 +11,27 @@ import zmq.green as zmq
 from gevent import spawn
 import msgpack
 
-from multiprocessing import Process
-from multiprocessing import Queue, Event
-from Queue import Empty, Full
-
 # Python does not provide a clean way to create signelton objects
-# All ASync stuff are part of the module namespace directly.
-
+# All ASync stuff are part of the module's namespace directly.
 
 __subs = dict()
 
 # Pseudo-thread
 def sub_greenlet(endpoint, sub_key, callback):
-    print "Init for %s %s %s" % (endpoint, sub_key, callback)
+    #print "Init for %s %s %s" % (endpoint, sub_key, callback)
     ctx = zmq.Context()
     sock = ctx.socket(zmq.SUB)
     sock.setsockopt(zmq.SUBSCRIBE, sub_key)
     sock.connect(endpoint)
     while True:
-        print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
+        #print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
         # non-blocking
         msgs = sock.recv_multipart()
         assert msgs[0] == sub_key
-        print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
+        #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
         callback(msgpack.loads(msgs[1]))
 
-    print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
+    #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
 
 def subscribe(endpoint, sub_key, callback):
     if sub_key in __subs:
@@ -58,7 +52,7 @@ def unsubscribe(sub_key):
         return False
 
 def killall():
-    for sub_key, glet in __subs:
+    for sub_key, glet in __subs.items():
         unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
@@ -92,7 +86,7 @@ class DimonRESTBase(object):
         except requests.exceptions.Timeout as e:
             logging.error("DimoneRESTBase: Timeout error: %s" % e)
             return False
-        print("Status: %s" % r.status_code)
+        logging.debug("HTTP Status: %s" % r.status_code)
         if raise_error:
             r.raise_for_status()
             if req_type == 'get':
@@ -117,6 +111,8 @@ class DimonRESTBase(object):
         return self._r('post', self.post_url)
 
     def stop_monitor(self, timeout = None, raise_error = True):
+        if self.async_key:
+            self.unregister_callback()
         return self._r('delete', self.del_url)
 
     def register_callback(self, callback):
