@@ -4,36 +4,82 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
+__concurrency_impl = 'gevent' # single process, single thread
+#__concurrency_impl = 'multiprocessing' # multiple processes
+
 import re
 import logging
 import requests
-import zmq.green as zmq
-from gevent import spawn
+if __concurrency_impl == "gevent":
+    import zmq.green as zmq
+    from gevent import Greenlet as Process
+    from gevent.queue import Queue
+    from gevent.event import Event
+elif __concurrency_impl == "multiprocessing":
+    import zmq
+    from multiprocessing import Process
+    from multiprocessing import Queue, Event
+else:
+    raise NotImplementedError("__concurrency_impl is not defined.")
+
 import msgpack
 
 # Python does not provide a clean way to create signelton objects
 # All ASync stuff are part of the module's namespace directly.
 
 __subs = dict()
+callback_queue = Queue()
+
+def spin_once():
+    sub_key, data = callback_queue.get()
+    try:
+        callback, g = __subs[sub_key]
+        callback(msgpack.loads(data))
+    except KeyError:
+        logging.error("Subscription key in Queue does not exist! This should never happen.")
+
+def spin():
+    while True:
+        spin_once()
 
 # Pseudo-thread
-# TODO: Instead of directly calling the callbacks, put results in a queue
-# and let the spin function call the callbacks
 
-def sub_greenlet(endpoint, sub_key, callback):
-    #print "Init for %s %s %s" % (endpoint, sub_key, callback)
-    ctx = zmq.Context()
-    sock = ctx.socket(zmq.SUB)
-    sock.setsockopt(zmq.SUBSCRIBE, sub_key)
-    sock.connect(endpoint)
-    while True:
-        #print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
-        # non-blocking
-        msgs = sock.recv_multipart()
-        assert msgs[0] == sub_key
-        #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
-        callback(msgpack.loads(msgs[1]))
+class ZMQProcess(Process):
+    def __init__(self, endpoint, sub_key, q):
+        Process.__init__(self)
+        self.endpoint = endpoint
+        self.sub_key = sub_key
+        self.q = q
+        self._terminate_event = Event()
+        self.daemon = True
 
+    def __repr__(self):
+        name =  self.__class__.__name__
+        return '<%s at %#x>' % (name, id(self))
+    
+    def set_terminate_event(self):
+        self._terminate_event.set()
+
+    def run(self):
+        #print "Init for %s %s %s" % (endpoint, sub_key, callback)
+        ctx = zmq.Context()
+        sock = ctx.socket(zmq.SUB)
+        sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
+        sock.connect(self.endpoint)
+        try:
+            while not self._terminate_event.is_set():
+                #print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
+                # non-blocking
+                msgs = sock.recv_multipart()
+                assert msgs[0] == self.sub_key
+                #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
+                #callback(msgpack.loads(msgs[1]))
+                # Putting compressed data on the q
+                self.q.put((msgs[0], msgs[1]))
+        except KeyboardInterrupt:
+            pass
+
+        return True
     #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
 
 def subscribe(endpoint, sub_key, callback):
@@ -41,13 +87,20 @@ def subscribe(endpoint, sub_key, callback):
         logging.error("Only one callback for %s is allowed. Skipping." % sub_key)
         return None
     else:
-        g = spawn(sub_greenlet, endpoint, sub_key, callback)
-        __subs[sub_key] = g
+        g = ZMQProcess(endpoint, sub_key, callback_queue)
+        g.start()
+        __subs[sub_key] = (callback, g)
         return g
 
 def unsubscribe(sub_key):
     try:
-        __subs[sub_key].kill()
+        callback, g = __subs[sub_key]
+        print "Trying to gracefully shutdown %s ..." % g
+        try:
+            g.kill()
+        except AttributeError:
+            g.set_terminate_event()
+            g.join()
         del __subs[sub_key]
         return True
     except KeyError:
@@ -55,7 +108,7 @@ def unsubscribe(sub_key):
         return False
 
 def killall():
-    for sub_key, glet in __subs.items():
+    for sub_key, value in __subs.items():
         unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError

@@ -17,8 +17,7 @@ for t in tasks:
 	t.start_monitor()
 
 try:
-	while True:
-		gevent.sleep(1)
+	spin()
 except KeyboardInterrupt:
 	print "Keyboard Interrupt"
 
