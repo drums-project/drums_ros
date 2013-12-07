@@ -4,21 +4,24 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
-__concurrency_impl = 'gevent' # single process, single thread
-#__concurrency_impl = 'multiprocessing' # multiple processes
+#__concurrency_impl = 'gevent' # single process, single thread
+__concurrency_impl = 'multiprocessing' # multiple processes
 
 import re
 import logging
 import requests
+import errno
+
 if __concurrency_impl == "gevent":
     import zmq.green as zmq
     from gevent import Greenlet as Process
-    from gevent.queue import Queue
+    from gevent.queue import Queue, Empty
     from gevent.event import Event
 elif __concurrency_impl == "multiprocessing":
     import zmq
     from multiprocessing import Process
     from multiprocessing import Queue, Event
+    from Queue import Empty
 else:
     raise NotImplementedError("__concurrency_impl is not defined.")
 
@@ -30,17 +33,18 @@ import msgpack
 __subs = dict()
 callback_queue = Queue()
 
-def spin_once():
-    sub_key, data = callback_queue.get()
-    try:
-        callback, g = __subs[sub_key]
-        callback(msgpack.loads(data))
-    except KeyError:
-        logging.error("Subscription key in Queue does not exist! This should never happen.")
 
+# This is blocking
 def spin():
-    while True:
-        spin_once()
+    try:
+        sub_key, data = callback_queue.get(block = True)
+        try:
+            callback, g = __subs[sub_key]
+            callback(msgpack.loads(data))
+        except KeyError:
+            logging.error("Subscription key in Queue does not exist! This should never happen.")
+    except Empty:
+        pass
 
 # Pseudo-thread
 
@@ -56,12 +60,12 @@ class ZMQProcess(Process):
     def __repr__(self):
         name =  self.__class__.__name__
         return '<%s at %#x>' % (name, id(self))
-    
+
     def set_terminate_event(self):
         self._terminate_event.set()
 
     def run(self):
-        #print "Init for %s %s %s" % (endpoint, sub_key, callback)
+        #print "Run for %s %s" % (self.endpoint, self.sub_key)
         ctx = zmq.Context()
         sock = ctx.socket(zmq.SUB)
         sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
@@ -70,7 +74,13 @@ class ZMQProcess(Process):
             while not self._terminate_event.is_set():
                 #print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
                 # non-blocking
-                msgs = sock.recv_multipart()
+                try:
+                    msgs = sock.recv_multipart()
+                except zmq.ZMQError, e:
+                    if e.errno == errno.EINTR:
+                        continue
+                    else:
+                        raise
                 assert msgs[0] == self.sub_key
                 #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
                 #callback(msgpack.loads(msgs[1]))
