@@ -28,7 +28,7 @@ setup(
     version = VERSION,
     author = 'Mani Monajjemi',
     author_email = 'TODO',
-    packages = [],
+    packages = ['dimonpy'],
     url = 'TODO',
     license = 'LICENSE',
     install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'gevent'],
