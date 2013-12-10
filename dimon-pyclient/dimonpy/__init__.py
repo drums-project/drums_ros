@@ -49,13 +49,17 @@ def spin():
 # Pseudo-thread
 
 class ZMQProcess(Process):
-    def __init__(self, endpoint, sub_key, q):
+    def __init__(self, endpoint, sub_key, q, use_sub_key = True):
         Process.__init__(self)
         self.endpoint = endpoint
-        self.sub_key = sub_key
+        if use_sub_key:
+            self.sub_key = sub_key
+        else:
+            self.sub_key = ''
         self.q = q
         self._terminate_event = Event()
         self.daemon = True
+
 
     def __repr__(self):
         name =  self.__class__.__name__
@@ -81,7 +85,7 @@ class ZMQProcess(Process):
                         continue
                     else:
                         raise
-                assert msgs[0] == self.sub_key
+                assert self.sub_key == '' or msgs[0] == self.sub_key
                 #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
                 #callback(msgpack.loads(msgs[1]))
                 # Putting compressed data on the q
@@ -92,12 +96,13 @@ class ZMQProcess(Process):
         return True
     #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
 
-def subscribe(endpoint, sub_key, callback):
+def subscribe(endpoint, sub_key, callback, use_sub_key_zmq = True):
     if sub_key in __subs:
         logging.error("Only one callback for %s is allowed. Skipping." % sub_key)
-        return None
+        # TODO: Fix this with exceptions
+        return not use_sub_key_zmq
     else:
-        g = ZMQProcess(endpoint, sub_key, callback_queue)
+        g = ZMQProcess(endpoint, sub_key, callback_queue, use_sub_key_zmq)
         g.start()
         __subs[sub_key] = (callback, g)
         return g
@@ -195,13 +200,20 @@ class DimonRESTBase(object):
 
         return zmq_endpoint
 
-    def register_callback(self, callback):
+    def register_callback(self, callback, one_process_per_key = True):
         zmq_endpoint = self.get_zmq_endpoint()
         if zmq_endpoint:
-            self.async_key = self.get_subscription_key()
-            print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
+            if one_process_per_key:
+                self.async_key = self.get_subscription_key()
+            else:
+                self.async_key = self.host
+            if one_process_per_key:
+                print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
 
-            self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback)
+                self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback, True)
+            else:
+                print "Trying to subscribe to all keys from %s" % (zmq_endpoint,)
+                self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback, False)
             return self.async_greenlet != None
         else:
             return False
