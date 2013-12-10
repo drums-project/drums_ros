@@ -96,6 +96,7 @@ class ZMQProcess(Process):
         return True
     #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
 
+
 def subscribe(endpoint, sub_key, callback, use_sub_key_zmq = True):
     if sub_key in __subs:
         logging.error("Only one callback for %s is allowed. Skipping." % sub_key)
@@ -106,6 +107,7 @@ def subscribe(endpoint, sub_key, callback, use_sub_key_zmq = True):
         g.start()
         __subs[sub_key] = (callback, g)
         return g
+
 
 def unsubscribe(sub_key):
     try:
@@ -144,14 +146,15 @@ class DimonRESTBase(object):
         self.async_greenlet = None
         self.async_key = None
 
-    def _r(self, req_type, url, timeout = None, raise_error = True):
+    # Sends HTTP Requests
+    def _r(self, req_type, url, raise_error=True, timeout=None):
         try:
             if req_type == 'get':
-                r = requests.get(url, timeout = timeout)
+                r = requests.get(url, timeout=timeout)
             elif req_type == 'post':
-                r = requests.post(url, timeout = timeout)
+                r = requests.post(url, timeout=timeout)
             elif req_type == 'delete':
-                r = requests.delete(url, timeout = timeout)
+                r = requests.delete(url, timeout=timeout)
         except requests.ConnectionError as e:
             logging.error("DimoneRESTBase: Connection Error: %s" % e)
             return False
@@ -165,27 +168,34 @@ class DimonRESTBase(object):
                 return r.json()
             else:
                 # TODO: Remove This
+                # Should be alwyas 200
                 assert r.status_code == 200
-                return r.status_code # Should be alwyas 200
+                return r.status_code
         else:
             if r.status_code == 200:
                 return r.json()
             else:
                 return r.status_code
 
-    def get_info(self, timeout = None, raise_error = True):
-        return self._r('get', self.base_url + '/info')
+    def get_info(self, raise_error=True, timeout=None):
+        return self._r('get', self.base_url + '/info', raise_error, timeout)
 
-    def get(self, path = "", timeout = None, raise_error = True):
-        return self._r('get', self.get_url + path)
+    def get(self, path="", raise_error=True, timeout=None):
+        return self._r('get', self.get_url + path, raise_error, timeout)
 
-    def start_monitor(self, timeout = None, raise_error = True):
-        return self._r('post', self.post_url)
+    def start_monitor(self, raise_error=True, timeout=None,):
+        try:
+            return self._r('post', self.post_url, raise_error, timeout)
+        except requests.exceptions.HTTPError:
+            return False
 
-    def stop_monitor(self, timeout = None, raise_error = True):
-        if self.async_key:
+    def stop_monitor(self, raise_error=True, timeout=None):
+        if self.async_key != self.host:
             self.unregister_callback()
-        return self._r('delete', self.del_url)
+        try:
+            return self._r('delete', self.del_url, raise_error, timeout)
+        except requests.exceptions.HTTPError:
+            return False
 
     def get_zmq_endpoint(self):
         print "Trying to determine the 0mq publisher endpoint"
