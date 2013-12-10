@@ -97,28 +97,35 @@ class ZMQProcess(Process):
     #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
 
 
-def subscribe(endpoint, sub_key, callback, use_sub_key_zmq = True):
-    if sub_key in __subs:
-        logging.error("Only one callback for %s is allowed. Skipping." % sub_key)
-        # TODO: Fix this with exceptions
-        return not use_sub_key_zmq
-    else:
+def subscribe(endpoint, sub_key, callback, use_sub_key_zmq=True):
+    try:
+        current_callback, current_g, count = __subs[sub_key]
+        if current_callback == callback:
+            __subs[sub_key] = (current_callback, current_g, count + 1)
+            return True
+        else:
+            logging.warning("Only one callback for %s is allowed. Skipping." % sub_key)
+            return False
+    except KeyError:
         g = ZMQProcess(endpoint, sub_key, callback_queue, use_sub_key_zmq)
         g.start()
-        __subs[sub_key] = (callback, g)
+        __subs[sub_key] = (callback, g, 1)
         return g
 
 
 def unsubscribe(sub_key):
     try:
-        callback, g = __subs[sub_key]
-        print "Trying to gracefully shutdown %s ..." % g
-        try:
-            g.kill()
-        except AttributeError:
-            g.set_terminate_event()
-            g.join()
-        del __subs[sub_key]
+        callback, g, count = __subs[sub_key]
+        if count == 1:
+            print "Trying to gracefully shutdown %s ..." % g
+            try:
+                g.kill()
+            except AttributeError:
+                g.set_terminate_event()
+                g.join()
+            del __subs[sub_key]
+        else:
+            __subs[sub_key] = (callback, g , count - 1)
         return True
     except KeyError:
         logging.error("Subscribtion Key %s not found." % sub_key)
@@ -190,7 +197,7 @@ class DimonRESTBase(object):
             return False
 
     def stop_monitor(self, raise_error=True, timeout=None):
-        if self.async_key != self.host:
+        if self.async_key:
             self.unregister_callback()
         try:
             return self._r('delete', self.del_url, raise_error, timeout)
@@ -210,7 +217,7 @@ class DimonRESTBase(object):
 
         return zmq_endpoint
 
-    def register_callback(self, callback, one_process_per_key = True):
+    def register_callback(self, callback, one_process_per_key=True):
         zmq_endpoint = self.get_zmq_endpoint()
         if zmq_endpoint:
             if one_process_per_key:
