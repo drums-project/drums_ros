@@ -135,6 +135,7 @@ class DimonRESTBase(object):
             raise RuntimeError
         self._update_url()
 
+        # TODO: Rename this
         self.async_greenlet = None
         self.async_key = None
 
@@ -181,7 +182,7 @@ class DimonRESTBase(object):
             self.unregister_callback()
         return self._r('delete', self.del_url)
 
-    def register_callback(self, callback):
+    def get_zmq_endpoint(self):
         print "Trying to determine the 0mq publisher endpoint"
         try:
             zmq_endpoint = self.get_info()['zmq_publish']
@@ -192,11 +193,18 @@ class DimonRESTBase(object):
             logging.error("Error getting publisher information.")
             return False
 
-        self.async_key = self._get_subscription_key()
-        print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
+        return zmq_endpoint
 
-        self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback)
-        return self.async_greenlet != None
+    def register_callback(self, callback):
+        zmq_endpoint = self.get_zmq_endpoint()
+        if zmq_endpoint:
+            self.async_key = self.get_subscription_key()
+            print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
+
+            self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback)
+            return self.async_greenlet != None
+        else:
+            return False
 
     def unregister_callback(self):
         if not self.async_greenlet:
@@ -214,7 +222,7 @@ class DimonRESTBase(object):
     def _get_partial_url(self):
         raise NotImplementedError
 
-    def _get_subscription_key(self):
+    def get_subscription_key(self):
         raise NotImplementedError
 
 class DimonPID(DimonRESTBase):
@@ -233,7 +241,7 @@ class DimonPID(DimonRESTBase):
         self.del_url = self.get_url
         self.post_url = self.get_url
 
-    def _get_subscription_key(self):
+    def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'pid', self.pid)
 
 class DimonHost(DimonRESTBase):
@@ -249,7 +257,7 @@ class DimonHost(DimonRESTBase):
         self.del_url = self.get_url
         self.post_url = self.get_url
 
-    def _get_subscription_key(self):
+    def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'host', 'host')
 
 
@@ -270,7 +278,7 @@ class DimonLatency(DimonRESTBase):
         self.del_url = self.get_url
         self.post_url = self.get_url
 
-    def _get_subscription_key(self):
+    def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'latency', self.target)
 
 class DimonSocket(DimonRESTBase):
@@ -291,5 +299,5 @@ class DimonSocket(DimonRESTBase):
         self.post_url = self.get_url + '/%s/%s/%s' % (self.proto, self.direction, self.port)
         self.del_url = self.post_url
 
-    def _get_subscription_key(self):
+    def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'socket', 'socket')
