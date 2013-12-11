@@ -47,7 +47,6 @@ def spin():
         pass
 
 # Pseudo-thread
-
 class ZMQProcess(Process):
     def __init__(self, endpoint, sub_key, q, use_sub_key = True):
         Process.__init__(self)
