@@ -52,13 +52,12 @@ def spin():
 
 # Pseudo-thread
 class ZMQProcess(Process):
-    def __init__(self, cmd_endpoint, q):
+    def __init__(self, cmd_endpoint, result_q):
         Process.__init__(self)
         self.cmd_endpoint = cmd_endpoint
-        self.q = q
+        self.result_q = result_q
         self._terminate_event = Event()
         self.daemon = True
-        print "zmqp init done"
 
     def __repr__(self):
         name =  self.__class__.__name__
@@ -68,7 +67,6 @@ class ZMQProcess(Process):
         self._terminate_event.set()
 
     def run(self):
-        #print "Run for %s %s" % (self.endpoint, self.sub_key)
         ctx = zmq.Context()
         cmd_sock = ctx.socket(zmq.PULL)
         cmd_sock.connect(self.cmd_endpoint)
@@ -79,57 +77,51 @@ class ZMQProcess(Process):
         poller.register(sub_sock, zmq.POLLIN)
         #sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
         #sock.connect(self.endpoint)
-        print "zmqp run init done"
-        try:
-            while not self._terminate_event.is_set():
-                try:
-                    socks = dict(poller.poll())
+        logging.info("Running ZMQProcess.")
+        while not self._terminate_event.is_set():
+            try:
+                socks = dict(poller.poll())
 
-                    if cmd_sock in socks and socks[cmd_sock] == zmq.POLLIN:
-                        # CMD
-                        cmd_string = cmd_sock.recv_string()
-                        print "ZMQ heard: %s" % cmd_string
-                        cmd, endpoint, sub_key = cmd_string.split('@')
-                        if cmd == 'sub':
-                            sub_sock.setsockopt_string(zmq.SUBSCRIBE, sub_key)
-                            if len(endpoint) > 0:
-                                sub_sock.connect(endpoint)
-                        if cmd == 'unsub':
-                            sub_sock.setsockopt_string(zmq.UNSUBSCRIBE, sub_key)
-                            if len(endpoint) > 0:
+                if cmd_sock in socks and socks[cmd_sock] == zmq.POLLIN:
+                    # CMD
+                    cmd_string = cmd_sock.recv_string()
+                    logging.info("ZMQ heard: %s" % cmd_string)
+                    cmd, endpoint, sub_key = cmd_string.split('@')
+                    if cmd == 'sub':
+                        sub_sock.setsockopt_string(zmq.SUBSCRIBE, sub_key)
+                        if len(endpoint) > 0:
+                            sub_sock.connect(endpoint)
+                    if cmd == 'unsub':
+                        sub_sock.setsockopt_string(zmq.UNSUBSCRIBE, sub_key)
+                        if len(endpoint) > 0:
+                            try:
                                 sub_sock.disconnect(endpoint)
+                            except AttributeError:
+                                logging.warnings("ZMQ does not support disconnect.")
+                                pass
 
-                    if sub_sock in socks and socks[sub_sock] == zmq.POLLIN:
-                        sub_key, payload = sub_sock.recv_multipart()
-                        self.q.put((sub_key, payload))
-                except zmq.ZMQError, e:
-                    if e.errno == errno.EINTR:
-                        continue
-                    else:
-                        raise
-                #assert self.sub_key == '' or msgs[0] == self.sub_key
-                #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
-                #callback(msgpack.loads(msgs[1]))
-                # Putting compressed data on the q
-                #elf.q.put((msgs[0], msgs[1]))
-        except KeyboardInterrupt:
-            pass
-
+                if sub_sock in socks and socks[sub_sock] == zmq.POLLIN:
+                    sub_key, payload = sub_sock.recv_multipart()
+                    self.result_q.put((sub_key, payload))
+            except zmq.ZMQError, e:
+                if e.errno == errno.EINTR:
+                    continue
+                else:
+                    raise
+            except KeyboardInterrupt:
+                pass
+        logging.info("ZMQProcess exited cleanly.")
         return True
-    print "Exiting ..."
-
-
 
 def subscribe(endpoint, sub_key, callback):
     global zmq_process, zmq_cmd_sock
     if not zmq_process:
-        print "Creating socket and process"
+        logging.info("Creating zmq socket and process for the first time.")
         ctx = zmq.Context()
         zmq_cmd_sock = ctx.socket(zmq.PUSH)
         zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
         time.sleep(0.1)
         zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
-        print "Starting ..."
         zmq_process.start()
 
     if not endpoint in __endpoints:
@@ -146,9 +138,7 @@ def subscribe(endpoint, sub_key, callback):
         __endpoint_keys[endpoint].add(sub_key)
         __subs[sub_key] = callback
         cmd_str = "sub@%s@%s" % (e, sub_key, )
-        print "sending ..."
         zmq_cmd_sock.send_string(cmd_str)
-        print "done"
 
         return True
 
@@ -163,17 +153,16 @@ def unsubscribe(endpoint, sub_key):
 
     del __subs[sub_key]
     __endpoint_keys[endpoint].remove(sub_key)
-    e = endpoint
+    e = ''
     if not __endpoint_keys[endpoint]:
         __endpoints.remove(endpoint)
-        e = ''
+        e = endpoint
     cmd_str = "unsub@%s@%s" % (e, sub_key,)
     zmq_cmd_sock.send_string(cmd_str)
 
     if not __endpoints:
-        print "ZMQ Process is not needed any more! Killing it ..."
+        logging.info("ZMQ Process is not needed any more! Killing it ...")
         zmq_process.set_terminate_event()
-        zmq_cmd_sock.send_string("bemir@@")
 
     return True
 
@@ -249,11 +238,10 @@ class DimonRESTBase(object):
             return False
 
     def get_zmq_endpoint(self):
-        print "Trying to determine the 0mq publisher endpoint"
+        logging.info("Trying to determine the 0mq publisher endpoint")
         try:
             zmq_endpoint = self.get_info()['zmq_publish']
         except KeyError:
-            print "Key error"
             return False
         except:
             logging.error("Error getting publisher information.")
@@ -265,7 +253,7 @@ class DimonRESTBase(object):
         self.zmq_endpoint = self.get_zmq_endpoint()
         if self.zmq_endpoint:
             self.async_key = self.get_subscription_key()
-            print "Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key)
+            logging.info("Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key))
             return subscribe(self.zmq_endpoint, self.async_key, callback)
         else:
             return False
