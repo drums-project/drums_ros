@@ -31,7 +31,7 @@ setup(
     packages = ['dimonpy'],
     url = 'TODO',
     license = 'LICENSE',
-    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'gevent'],
+    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python'],
     description = 'TODO',
     scripts = [],
     test_suite = ''

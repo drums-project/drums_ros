@@ -4,42 +4,46 @@ __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
-#__concurrency_impl = 'gevent' # single process, single thread
-__concurrency_impl = 'multiprocessing' # multiple processes
-
 import re
 import logging
 import requests
 import errno
 
-if __concurrency_impl == "gevent":
-    import zmq.green as zmq
-    from gevent import Greenlet as Process
-    from gevent.queue import Queue, Empty
-    from gevent.event import Event
-elif __concurrency_impl == "multiprocessing":
-    import zmq
-    from multiprocessing import Process
-    from multiprocessing import Queue, Event
-    from Queue import Empty
-else:
-    raise NotImplementedError("__concurrency_impl is not defined.")
+import zmq
+from multiprocessing import Process
+from multiprocessing import Queue, Event
+from Queue import Empty
+import time
 
 import msgpack
 
 # Python does not provide a clean way to create signelton objects
 # All ASync stuff are part of the module's namespace directly.
 
-__subs = dict()
-callback_queue = Queue()
 
+# Set of hosts (endpoints)
+__endpoints = set()
+
+# Map from sub_key to callback
+# key -> callback
+__subs = dict()
+
+# Map from hostnames (endpoints) to sub_keys
+__endpoint_keys = dict()
+
+# The single ZMQ_Process instant
+zmq_process = None
+zmq_cmd_sock = None
+ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
+
+callback_queue = Queue()
 
 # This is blocking
 def spin():
     try:
         sub_key, data = callback_queue.get(block = True)
         try:
-            callback, g = __subs[sub_key]
+            callback = __subs[sub_key]
             callback(msgpack.loads(data))
         except KeyError:
             logging.error("Subscription key in Queue does not exist! This should never happen.")
@@ -48,17 +52,13 @@ def spin():
 
 # Pseudo-thread
 class ZMQProcess(Process):
-    def __init__(self, endpoint, sub_key, q, use_sub_key = True):
+    def __init__(self, cmd_endpoint, q):
         Process.__init__(self)
-        self.endpoint = endpoint
-        if use_sub_key:
-            self.sub_key = sub_key
-        else:
-            self.sub_key = ''
+        self.cmd_endpoint = cmd_endpoint
         self.q = q
         self._terminate_event = Event()
         self.daemon = True
-
+        print "zmqp init done"
 
     def __repr__(self):
         name =  self.__class__.__name__
@@ -70,65 +70,112 @@ class ZMQProcess(Process):
     def run(self):
         #print "Run for %s %s" % (self.endpoint, self.sub_key)
         ctx = zmq.Context()
-        sock = ctx.socket(zmq.SUB)
-        sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
-        sock.connect(self.endpoint)
+        cmd_sock = ctx.socket(zmq.PULL)
+        cmd_sock.connect(self.cmd_endpoint)
+
+        sub_sock = ctx.socket(zmq.SUB)
+        poller = zmq.Poller()
+        poller.register(cmd_sock, zmq.POLLIN)
+        poller.register(sub_sock, zmq.POLLIN)
+        #sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
+        #sock.connect(self.endpoint)
+        print "zmqp run init done"
         try:
             while not self._terminate_event.is_set():
-                #print "Waiting for packet %s %s %s" % (endpoint, sub_key, callback)
-                # non-blocking
                 try:
-                    msgs = sock.recv_multipart()
+                    socks = dict(poller.poll())
+
+                    if cmd_sock in socks and socks[cmd_sock] == zmq.POLLIN:
+                        # CMD
+                        cmd_string = cmd_sock.recv_string()
+                        print "ZMQ heard: %s" % cmd_string
+                        cmd, endpoint, sub_key = cmd_string.split('@')
+                        if cmd == 'sub':
+                            sub_sock.setsockopt_string(zmq.SUBSCRIBE, sub_key)
+                            if len(endpoint) > 0:
+                                sub_sock.connect(endpoint)
+                        if cmd == 'unsub':
+                            sub_sock.setsockopt_string(zmq.UNSUBSCRIBE, sub_key)
+                            if len(endpoint) > 0:
+                                sub_sock.disconnect(endpoint)
+
+                    if sub_sock in socks and socks[sub_sock] == zmq.POLLIN:
+                        sub_key, payload = sub_sock.recv_multipart()
+                        self.q.put((sub_key, payload))
                 except zmq.ZMQError, e:
                     if e.errno == errno.EINTR:
                         continue
                     else:
                         raise
-                assert self.sub_key == '' or msgs[0] == self.sub_key
+                #assert self.sub_key == '' or msgs[0] == self.sub_key
                 #print "Calling callback %s %s %s" % (endpoint, sub_key, callback)
                 #callback(msgpack.loads(msgs[1]))
                 # Putting compressed data on the q
-                self.q.put((msgs[0], msgs[1]))
+                #elf.q.put((msgs[0], msgs[1]))
         except KeyboardInterrupt:
             pass
 
         return True
-    #print "Exit  for %s %s %s" % (endpoint, sub_key, callback)
+    print "Exiting ..."
 
 
-def subscribe(endpoint, sub_key, callback, use_sub_key_zmq=True):
-    try:
-        current_callback, current_g, count = __subs[sub_key]
-        if current_callback == callback:
-            __subs[sub_key] = (current_callback, current_g, count + 1)
-            return True
-        else:
-            logging.warning("Only one callback for %s is allowed. Skipping." % sub_key)
-            return False
-    except KeyError:
-        g = ZMQProcess(endpoint, sub_key, callback_queue, use_sub_key_zmq)
-        g.start()
-        __subs[sub_key] = (callback, g, 1)
-        return g
 
+def subscribe(endpoint, sub_key, callback):
+    global zmq_process, zmq_cmd_sock
+    if not zmq_process:
+        print "Creating socket and process"
+        ctx = zmq.Context()
+        zmq_cmd_sock = ctx.socket(zmq.PUSH)
+        zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
+        time.sleep(0.1)
+        zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
+        print "Starting ..."
+        zmq_process.start()
 
-def unsubscribe(sub_key):
-    try:
-        callback, g, count = __subs[sub_key]
-        if count == 1:
-            print "Trying to gracefully shutdown %s ..." % g
-            try:
-                g.kill()
-            except AttributeError:
-                g.set_terminate_event()
-                g.join()
-            del __subs[sub_key]
-        else:
-            __subs[sub_key] = (callback, g , count - 1)
-        return True
-    except KeyError:
-        logging.error("Subscribtion Key %s not found." % sub_key)
+    if not endpoint in __endpoints:
+        __endpoints.add(endpoint)
+        __endpoint_keys[endpoint] = set()
+        e = endpoint
+    else:
+        e = ''
+
+    if sub_key in __endpoint_keys[endpoint]:
+        logging.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
         return False
+    else:
+        __endpoint_keys[endpoint].add(sub_key)
+        __subs[sub_key] = callback
+        cmd_str = "sub@%s@%s" % (e, sub_key, )
+        print "sending ..."
+        zmq_cmd_sock.send_string(cmd_str)
+        print "done"
+
+        return True
+
+def unsubscribe(endpoint, sub_key):
+    global zmq_process, zmq_cmd_sock
+    if not endpoint in __endpoint_keys:
+        logging.warnings("Endpoint is not being monitored: %s.", endpoint)
+        return False
+    if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
+        logging.warnings("This key is not being monitored: %s.", sub_key)
+        return False
+
+    del __subs[sub_key]
+    __endpoint_keys[endpoint].remove(sub_key)
+    e = endpoint
+    if not __endpoint_keys[endpoint]:
+        __endpoints.remove(endpoint)
+        e = ''
+    cmd_str = "unsub@%s@%s" % (e, sub_key,)
+    zmq_cmd_sock.send_string(cmd_str)
+
+    if not __endpoints:
+        print "ZMQ Process is not needed any more! Killing it ..."
+        zmq_process.set_terminate_event()
+        zmq_cmd_sock.send_string("bemir@@")
+
+    return True
 
 def killall():
     for sub_key, value in __subs.items():
@@ -148,10 +195,8 @@ class DimonRESTBase(object):
             raise RuntimeError
         self._update_url()
 
-        # TODO: Rename this
-        self.async_greenlet = None
         self.async_key = None
-
+        self.zmq_endpoint = None
     # Sends HTTP Requests
     def _r(self, req_type, url, raise_error=True, timeout=None):
         try:
@@ -216,30 +261,18 @@ class DimonRESTBase(object):
 
         return zmq_endpoint
 
-    def register_callback(self, callback, one_process_per_key=True):
-        zmq_endpoint = self.get_zmq_endpoint()
-        if zmq_endpoint:
-            if one_process_per_key:
-                self.async_key = self.get_subscription_key()
-            else:
-                self.async_key = self.host
-            if one_process_per_key:
-                print "Trying to subscribe to %s with key %s" % (zmq_endpoint, self.async_key)
-
-                self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback, True)
-            else:
-                print "Trying to subscribe to all keys from %s" % (zmq_endpoint,)
-                self.async_greenlet = subscribe(zmq_endpoint, self.async_key, callback, False)
-            return self.async_greenlet != None
+    def register_callback(self, callback):
+        self.zmq_endpoint = self.get_zmq_endpoint()
+        if self.zmq_endpoint:
+            self.async_key = self.get_subscription_key()
+            print "Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key)
+            return subscribe(self.zmq_endpoint, self.async_key, callback)
         else:
             return False
 
     def unregister_callback(self):
-        if not self.async_greenlet:
-            logging.error("No async subscriber is running for %s" % self)
-            return False
-        if self.async_key:
-            return unsubscribe(self.async_key)
+        if self.async_key and self.zmq_endpoint:
+            return unsubscribe(self.zmq_endpoint, self.async_key)
         else:
             logging.error("Something is wrong in async module of %s" % self)
             return False
