@@ -10,10 +10,9 @@ import requests
 import errno
 
 import zmq
-from multiprocessing import Process
-from multiprocessing import Queue, Event
-from Queue import Empty
-from threading import Lock
+import multiprocessing
+import threading
+import Queue
 import time
 
 import msgpack
@@ -22,7 +21,7 @@ import msgpack
 # All ASync stuff are part of the module's namespace directly.
 
 
-__ilock = Lock()
+__ilock = threading.Lock()
 
 # Set of hosts (endpoints)
 __endpoints = set()
@@ -38,34 +37,64 @@ __endpoint_keys = dict()
 zmq_process = None
 zmq_cmd_sock = None
 ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
+callback_queue = multiprocessing.Queue()
 
-callback_queue = Queue()
+__terminate_event = threading.Event()
 
+def init():
+    global zmq_process, zmq_cmd_sock, __ilock
+    if not zmq_process:
+        logging.info("Creating zmq socket and process for the first time.")
+        ctx = zmq.Context()
+        zmq_cmd_sock = ctx.socket(zmq.PUSH)
+        zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
+        time.sleep(0.1)
+        zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
+        zmq_process.start()
 
-def get_callback_queue():
-    global callback_queue
-    return callback_queue
+    spinner = threading.Thread(target=__spin, args=())
+    spinner.daemon = True
+    spinner.start()
+
+def is_shutdown():
+    return __terminate_event.is_set()
+
+def shutdown():
+    global zmq_process
+    if zmq_process.is_alive():
+        logging.info("ZMQ Process is still alive. Killing it.")
+        zmq_process.set_terminate_event()
+        zmq_cmd_sock.send_string('@@')
 
 # This is blocking
-def spin(block = True):
-    try:
-        sub_key, data = callback_queue.get(block = block)
+def __spin():
+    global __terminate_event
+    while True:
         try:
-            with __ilock:
-                callback = __subs[sub_key]
-            callback(msgpack.loads(data))
-        except KeyError:
-            logging.error("Subscription key in Queue does not exist! This should never happen.")
-    except Empty:
-        pass
+            sub_key, data = callback_queue.get()
+            if sub_key == '__term__':
+                # ZMQ will automatically shutdown after all subscription
+                # and endpoints are removed
+                # ACK back to main thread to shutdown
+                __terminate_event.set()
+                break
+            try:
+                with __ilock:
+                    callback = __subs[sub_key]
+                callback(msgpack.loads(data))
+            except KeyError:
+                logging.error("Subscription key in Queue does not exist! This should never happen.")
+        except Queue.Empty:
+            pass
+    logging.info("dimonpy spinner thread exited cleanly.")
 
 # Pseudo-thread
-class ZMQProcess(Process):
+class ZMQProcess(multiprocessing.Process):
     def __init__(self, cmd_endpoint, result_q):
-        Process.__init__(self)
+        multiprocessing.Process.__init__(self)
         self.cmd_endpoint = cmd_endpoint
         self.result_q = result_q
-        self._terminate_event = Event()
+        self._terminate_event = multiprocessing.Event()
         self.daemon = True
 
     def __repr__(self):
@@ -118,21 +147,16 @@ class ZMQProcess(Process):
                 else:
                     raise
             except KeyboardInterrupt:
+                # Let's inform the spinner thread to terminate
+                # TODO: FIND A BETTER WAY
+                #print "CTRL+C HEARD"
+                self.result_q.put(('__term__', '__term__'))
                 pass
         logging.info("ZMQProcess exited cleanly.")
         return True
 
 def subscribe(endpoint, sub_key, callback):
     global zmq_process, zmq_cmd_sock, __ilock
-    if not zmq_process:
-        logging.info("Creating zmq socket and process for the first time.")
-        ctx = zmq.Context()
-        zmq_cmd_sock = ctx.socket(zmq.PUSH)
-        zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
-        time.sleep(0.1)
-        zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
-        zmq_process.start()
-
     cmd_str = ""
     with __ilock:
         if not endpoint in __endpoints:
@@ -175,7 +199,6 @@ def unsubscribe(endpoint, sub_key):
             e = endpoint
 
         kill_zmq = not __endpoints
-
 
     cmd_str = "unsub@%s@%s" % (e, sub_key,)
     zmq_cmd_sock.send_string(cmd_str)
