@@ -13,6 +13,7 @@ import zmq
 from multiprocessing import Process
 from multiprocessing import Queue, Event
 from Queue import Empty
+from threading import Lock
 import time
 
 import msgpack
@@ -20,6 +21,8 @@ import msgpack
 # Python does not provide a clean way to create signelton objects
 # All ASync stuff are part of the module's namespace directly.
 
+
+__ilock = Lock()
 
 # Set of hosts (endpoints)
 __endpoints = set()
@@ -38,12 +41,18 @@ ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
 
 callback_queue = Queue()
 
+
+def get_callback_queue():
+    global callback_queue
+    return callback_queue
+
 # This is blocking
-def spin():
+def spin(block = True):
     try:
-        sub_key, data = callback_queue.get(block = True)
+        sub_key, data = callback_queue.get(block = block)
         try:
-            callback = __subs[sub_key]
+            with __ilock:
+                callback = __subs[sub_key]
             callback(msgpack.loads(data))
         except KeyError:
             logging.error("Subscription key in Queue does not exist! This should never happen.")
@@ -114,7 +123,7 @@ class ZMQProcess(Process):
         return True
 
 def subscribe(endpoint, sub_key, callback):
-    global zmq_process, zmq_cmd_sock
+    global zmq_process, zmq_cmd_sock, __ilock
     if not zmq_process:
         logging.info("Creating zmq socket and process for the first time.")
         ctx = zmq.Context()
@@ -124,50 +133,65 @@ def subscribe(endpoint, sub_key, callback):
         zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
         zmq_process.start()
 
-    if not endpoint in __endpoints:
-        __endpoints.add(endpoint)
-        __endpoint_keys[endpoint] = set()
-        e = endpoint
-    else:
-        e = ''
+    cmd_str = ""
+    with __ilock:
+        if not endpoint in __endpoints:
+            __endpoints.add(endpoint)
+            __endpoint_keys[endpoint] = set()
+            e = endpoint
+        else:
+            e = ''
 
-    if sub_key in __endpoint_keys[endpoint]:
-        logging.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
-        return False
-    else:
-        __endpoint_keys[endpoint].add(sub_key)
-        __subs[sub_key] = callback
-        cmd_str = "sub@%s@%s" % (e, sub_key, )
+        if sub_key in __endpoint_keys[endpoint]:
+            logging.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
+            return False
+        else:
+            __endpoint_keys[endpoint].add(sub_key)
+            __subs[sub_key] = callback
+            cmd_str = "sub@%s@%s" % (e, sub_key, )
+
+    if cmd_str:
         zmq_cmd_sock.send_string(cmd_str)
-
         return True
+    else:
+        return False
 
 def unsubscribe(endpoint, sub_key):
-    global zmq_process, zmq_cmd_sock
-    if not endpoint in __endpoint_keys:
-        logging.warnings("Endpoint is not being monitored: %s.", endpoint)
-        return False
-    if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
-        logging.warnings("This key is not being monitored: %s.", sub_key)
-        return False
+    global zmq_process, zmq_cmd_sock, __ilock
 
-    del __subs[sub_key]
-    __endpoint_keys[endpoint].remove(sub_key)
-    e = ''
-    if not __endpoint_keys[endpoint]:
-        __endpoints.remove(endpoint)
-        e = endpoint
+    with __ilock:
+        if not endpoint in __endpoint_keys:
+            logging.warnings("Endpoint is not being monitored: %s.", endpoint)
+            return False
+        if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
+            logging.warnings("This key is not being monitored: %s.", sub_key)
+            return False
+
+        del __subs[sub_key]
+        __endpoint_keys[endpoint].remove(sub_key)
+        e = ''
+        if not __endpoint_keys[endpoint]:
+            __endpoints.remove(endpoint)
+            e = endpoint
+
+        kill_zmq = not __endpoints
+
+
     cmd_str = "unsub@%s@%s" % (e, sub_key,)
     zmq_cmd_sock.send_string(cmd_str)
 
-    if not __endpoints:
+    if kill_zmq:
         logging.info("ZMQ Process is not needed any more! Killing it ...")
         zmq_process.set_terminate_event()
 
     return True
 
 def killall():
-    for sub_key, value in __subs.items():
+    global __ilock
+    with __ilock:
+        items = __subs.items()[:]
+
+    for sub_key, value in items:
         unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
