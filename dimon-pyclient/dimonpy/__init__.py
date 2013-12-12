@@ -1,8 +1,11 @@
-    # -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 __version__ = "0.1.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
+
+
+# TODO: CHECK IF zmq_cmd_sock and zmq_process are thread-safe
 
 import re
 import logging
