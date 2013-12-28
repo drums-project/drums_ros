@@ -23,7 +23,6 @@ import msgpack
 # Python does not provide a clean way to create signelton objects
 # All ASync stuff are part of the module's namespace directly.
 
-
 __ilock = threading.Lock()
 
 # Set of hosts (endpoints)
@@ -42,12 +41,14 @@ zmq_cmd_sock = None
 ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
 callback_queue = multiprocessing.Queue()
 
-__terminate_event = threading.Event()
+spinner_thread = None
+__spinner_terminate_event = threading.Event()
 
 def init():
-    global zmq_process, zmq_cmd_sock, __ilock
+    global zmq_process, zmq_cmd_sock, spinner_thread, __ilock
+    __logger = logging.getLogger(__name__)
     if not zmq_process:
-        logging.info("Creating zmq socket and process for the first time.")
+        __logger.info("Creating zmq socket and process for the first time.")
         ctx = zmq.Context()
         zmq_cmd_sock = ctx.socket(zmq.PUSH)
         zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
@@ -55,41 +56,63 @@ def init():
         zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
         zmq_process.start()
 
-    spinner = threading.Thread(target=__spin, args=())
-    spinner.daemon = True
-    spinner.start()
+    if not spinner_thread:
+        spinner_thread = threading.Thread(target=__spin, args=())
+        spinner_thread.daemon = True
+        spinner_thread.start()
 
 def is_shutdown():
-    return __terminate_event.is_set()
+    return __spinner_terminate_event.is_set()
 
-def shutdown():
+def __kill_zmq_prcoess():
     global zmq_process
-    if zmq_process.is_alive():
-        logging.info("ZMQ Process is still alive. Killing it.")
+    __logger = logging.getLogger(__name__)
+    while zmq_process.is_alive():
+        __logger.info("ZMQ Process is still alive. Killing it.")
         zmq_process.set_terminate_event()
         zmq_cmd_sock.send_string('@@')
+        time.sleep(0.1)
+    __logger.info("ZMQ Process is not alive any more.")
+
+def __kill_spinner_thread():
+    global spinner_thread
+    __logger = logging.getLogger(__name__)
+    while spinner_thread.is_alive():
+        __logger.info("Spinner thread is still alive. Killing it.")
+        callback_queue.put(('__term__', '__term__'))
+        time.sleep(0.1)
+
+def shutdown():
+    global spinner_thread, __spinner_terminate_event
+    __logger = logging.getLogger(__name__)
+    __logger.info("Shutting down ZMQProcess ...")
+    __kill_zmq_prcoess()
+    __logger.info("Shutting down spinner thread ...")
+    __kill_spinner_thread()
 
 # This is blocking
 def __spin():
-    global __terminate_event
-    while True:
+    global __spinner_terminate_event
+    __logger = logging.getLogger(__name__)
+    while not __spinner_terminate_event.is_set():
         try:
             sub_key, data = callback_queue.get()
             if sub_key == '__term__':
                 # ZMQ will automatically shutdown after all subscription
                 # and endpoints are removed
                 # ACK back to main thread to shutdown
-                __terminate_event.set()
-                break
+                __spinner_terminate_event.set()
+                __logger.info("I've been told to terminate. Setting TerminateEvent.")
+                continue
             try:
                 with __ilock:
                     callback = __subs[sub_key]
                 callback(msgpack.loads(data))
             except KeyError:
-                logging.error("Subscription key in Queue does not exist! This should never happen.")
+                __logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
         except Queue.Empty:
             pass
-    logging.info("dimonpy spinner thread exited cleanly.")
+    __logger.info("dimonpy spinner thread exited cleanly.")
 
 # Pseudo-thread
 class ZMQProcess(multiprocessing.Process):
@@ -98,6 +121,7 @@ class ZMQProcess(multiprocessing.Process):
         self.cmd_endpoint = cmd_endpoint
         self.result_q = result_q
         self._terminate_event = multiprocessing.Event()
+        self.logger = logging.getLogger("%s.DimonZMQProcess" % __name__)
         self.daemon = True
 
     def __repr__(self):
@@ -118,7 +142,7 @@ class ZMQProcess(multiprocessing.Process):
         poller.register(sub_sock, zmq.POLLIN)
         #sock.setsockopt(zmq.SUBSCRIBE, self.sub_key)
         #sock.connect(self.endpoint)
-        logging.info("Running ZMQProcess.")
+        self.logger.info("Running ZMQProcess.")
         while not self._terminate_event.is_set():
             try:
                 socks = dict(poller.poll())
@@ -126,7 +150,7 @@ class ZMQProcess(multiprocessing.Process):
                 if cmd_sock in socks and socks[cmd_sock] == zmq.POLLIN:
                     # CMD
                     cmd_string = cmd_sock.recv_string()
-                    logging.info("ZMQ heard: %s" % cmd_string)
+                    self.logger.info("ZMQ heard: %s" % cmd_string)
                     cmd, endpoint, sub_key = cmd_string.split('@')
                     if cmd == 'sub':
                         sub_sock.setsockopt_string(zmq.SUBSCRIBE, sub_key)
@@ -138,7 +162,7 @@ class ZMQProcess(multiprocessing.Process):
                             try:
                                 sub_sock.disconnect(endpoint)
                             except AttributeError:
-                                logging.warnings("ZMQ does not support disconnect.")
+                                self.logger.warnings("ZMQ does not support disconnect.")
                                 pass
 
                 if sub_sock in socks and socks[sub_sock] == zmq.POLLIN:
@@ -153,13 +177,15 @@ class ZMQProcess(multiprocessing.Process):
                 # Let's inform the spinner thread to terminate
                 # TODO: FIND A BETTER WAY
                 #print "CTRL+C HEARD"
+                self.logger.info("ZMQProcess CTRL+C Detected.")
                 self.result_q.put(('__term__', '__term__'))
                 pass
-        logging.info("ZMQProcess exited cleanly.")
+        self.logger.info("ZMQProcess exited cleanly.")
         return True
 
 def subscribe(endpoint, sub_key, callback):
     global zmq_process, zmq_cmd_sock, __ilock
+    __logger = logging.getLogger(__name__)
     cmd_str = ""
     with __ilock:
         if not endpoint in __endpoints:
@@ -170,7 +196,7 @@ def subscribe(endpoint, sub_key, callback):
             e = ''
 
         if sub_key in __endpoint_keys[endpoint]:
-            logging.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
+            __logger.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
             return False
         else:
             __endpoint_keys[endpoint].add(sub_key)
@@ -185,13 +211,14 @@ def subscribe(endpoint, sub_key, callback):
 
 def unsubscribe(endpoint, sub_key):
     global zmq_process, zmq_cmd_sock, __ilock
+    __logger = logging.getLogger(__name__)
 
     with __ilock:
         if not endpoint in __endpoint_keys:
-            logging.warnings("Endpoint is not being monitored: %s.", endpoint)
+            __logger.warnings("Endpoint is not being monitored: %s.", endpoint)
             return False
         if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
-            logging.warnings("This key is not being monitored: %s.", sub_key)
+            __logger.warnings("This key is not being monitored: %s.", sub_key)
             return False
 
         del __subs[sub_key]
@@ -204,11 +231,15 @@ def unsubscribe(endpoint, sub_key):
         kill_zmq = not __endpoints
 
     cmd_str = "unsub@%s@%s" % (e, sub_key,)
-    zmq_cmd_sock.send_string(cmd_str)
 
-    if kill_zmq:
-        logging.info("ZMQ Process is not needed any more! Killing it ...")
-        zmq_process.set_terminate_event()
+
+    # TODO: Fix this
+    #if kill_zmq:
+    #    __logger.info("ZMQ Process is not needed any more! Killing it ...")
+    #    zmq_process.set_terminate_event()
+    #    time.sleep(0.1)
+
+    zmq_cmd_sock.send_string(cmd_str)
 
     return True
 
@@ -227,15 +258,17 @@ class DimonRESTBase(object):
         self.host = host
         self.http_port = http_port
         self.base_url = "http://%s:%s/dimon/v%s" % (host, http_port, __api__)
+        self.logger = logging.getLogger("%s.DimonREST" % __name__)
         try:
             self._parse_args(**kwargs)
         except KeyError:
-            logging.error(self.parse_err)
+            self.logger.error(self.parse_err)
             raise RuntimeError
         self._update_url()
 
         self.async_key = None
         self.zmq_endpoint = None
+
     # Sends HTTP Requests
     def _r(self, req_type, url, raise_error=True, timeout=None):
         try:
@@ -246,12 +279,12 @@ class DimonRESTBase(object):
             elif req_type == 'delete':
                 r = requests.delete(url, timeout=timeout)
         except requests.ConnectionError as e:
-            logging.error("DimoneRESTBase: Connection Error: %s" % e)
+            self.logger.error("DimoneRESTBase: Connection Error: %s" % e)
             return False
         except requests.exceptions.Timeout as e:
-            logging.error("DimoneRESTBase: Timeout error: %s" % e)
+            self.logger.error("DimoneRESTBase: Timeout error: %s" % e)
             return False
-        logging.debug("HTTP Status: %s" % r.status_code)
+        self.logger.debug("HTTP Status: %s" % r.status_code)
         if raise_error:
             r.raise_for_status()
             if req_type == 'get':
@@ -288,13 +321,13 @@ class DimonRESTBase(object):
             return False
 
     def get_zmq_endpoint(self):
-        logging.info("Trying to determine the 0mq publisher endpoint")
+        self.logger.info("Trying to determine the 0mq publisher endpoint")
         try:
             zmq_endpoint = self.get_info()['zmq_publish']
         except KeyError:
             return False
         except:
-            logging.error("Error getting publisher information.")
+            self.logger.error("Error getting publisher information.")
             return False
 
         return zmq_endpoint
@@ -303,7 +336,7 @@ class DimonRESTBase(object):
         self.zmq_endpoint = self.get_zmq_endpoint()
         if self.zmq_endpoint:
             self.async_key = self.get_subscription_key()
-            logging.info("Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key))
+            self.logger.info("Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key))
             return subscribe(self.zmq_endpoint, self.async_key, callback)
         else:
             return False
@@ -312,7 +345,7 @@ class DimonRESTBase(object):
         if self.async_key and self.zmq_endpoint:
             return unsubscribe(self.zmq_endpoint, self.async_key)
         else:
-            logging.error("Something is wrong in async module of %s" % self)
+            self.logger.error("Something is wrong in async module of %s" % self)
             return False
 
     def _parse_args(self, **kwargs):
