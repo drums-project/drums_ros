@@ -196,8 +196,9 @@ def subscribe(endpoint, sub_key, callback):
             e = ''
 
         if sub_key in __endpoint_keys[endpoint]:
-            __logger.warnings("This key is already being monitored: %s. Unsubscribe first.", sub_key)
-            return False
+            __logger.warning("This key is already being monitored: %s. Unsubscribe first.", sub_key)
+            # TODO: fix this
+            return True
         else:
             __endpoint_keys[endpoint].add(sub_key)
             __subs[sub_key] = callback
@@ -215,10 +216,10 @@ def unsubscribe(endpoint, sub_key):
 
     with __ilock:
         if not endpoint in __endpoint_keys:
-            __logger.warnings("Endpoint is not being monitored: %s.", endpoint)
+            __logger.warning("Endpoint is not being monitored: %s.", endpoint)
             return False
         if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
-            __logger.warnings("This key is not being monitored: %s.", sub_key)
+            __logger.warning("This key is not being monitored: %s.", sub_key)
             return False
 
         del __subs[sub_key]
@@ -333,7 +334,9 @@ class DimonRESTBase(object):
         return zmq_endpoint
 
     def register_callback(self, callback):
-        self.zmq_endpoint = self.get_zmq_endpoint()
+        # TODO: Invalidate cache
+        if not self.zmq_endpoint:
+            self.zmq_endpoint = self.get_zmq_endpoint()
         if self.zmq_endpoint:
             self.async_key = self.get_subscription_key()
             self.logger.info("Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key))
