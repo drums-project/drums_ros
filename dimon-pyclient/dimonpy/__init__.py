@@ -17,8 +17,13 @@ import multiprocessing
 import threading
 import Queue
 import time
-
 import msgpack
+import json
+
+from wsgiref.simple_server import make_server
+from ws4py.websocket import EchoWebSocket
+from ws4py.server.wsgirefserver import WSGIServer, WebSocketWSGIRequestHandler
+from ws4py.server.wsgiutils import WebSocketWSGIApplication
 
 # Python does not provide a clean way to create signelton objects
 # All ASync stuff are part of the module's namespace directly.
@@ -41,11 +46,14 @@ zmq_cmd_sock = None
 ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
 callback_queue = multiprocessing.Queue()
 
+# WebSocket Broadcaster
+ws_thread = None
+
 spinner_thread = None
 __spinner_terminate_event = threading.Event()
 
 def init():
-    global zmq_process, zmq_cmd_sock, spinner_thread, __ilock
+    global zmq_process, zmq_cmd_sock, spinner_thread, __ilock, ws_thread
     __logger = logging.getLogger(__name__)
     if not zmq_process:
         __logger.info("Creating zmq socket and process for the first time.")
@@ -55,6 +63,13 @@ def init():
         time.sleep(0.1)
         zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
         zmq_process.start()
+
+    if not ws_thread:
+        __logger.info("Creating WebScoket thread for the first time.")
+        # TODO: Change the port
+        ws_thread = WebSocketThread(8004)
+        ws_thread.daemon = True
+        ws_thread.start()
 
     if not spinner_thread:
         spinner_thread = threading.Thread(target=__spin, args=())
@@ -82,17 +97,26 @@ def __kill_spinner_thread():
         callback_queue.put(('__term__', '__term__'))
         time.sleep(0.1)
 
-def shutdown():
-    global spinner_thread, __spinner_terminate_event
+def __kill_ws_thread():
+    global ws_thread
     __logger = logging.getLogger(__name__)
-    __logger.info("Shutting down ZMQProcess ...")
-    __kill_zmq_prcoess()
+    while ws_thread.is_alive():
+        __logger.info("WebSocket Thread thread is still alive. Killing it.")
+        ws_thread.request_shutdown()
+        time.sleep(0.1)
+
+def shutdown():
+    __logger = logging.getLogger(__name__)
     __logger.info("Shutting down spinner thread ...")
     __kill_spinner_thread()
+    __logger.info("Shutting down WebSocketThread ...")
+    __kill_ws_thread()
+    __logger.info("Shutting down ZMQProcess ...")
+    __kill_zmq_prcoess()
 
 # This is blocking
 def __spin():
-    global __spinner_terminate_event
+    global __spinner_terminate_event, ws_thread
     __logger = logging.getLogger(__name__)
     while not __spinner_terminate_event.is_set():
         try:
@@ -107,14 +131,45 @@ def __spin():
             try:
                 with __ilock:
                     callback = __subs[sub_key]
-                callback(msgpack.loads(data))
+
+                msg = msgpack.loads(data)
+                callback(msg)
+                ws_thread.broadcast(msg, False)
             except KeyError:
                 __logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
         except Queue.Empty:
             pass
     __logger.info("dimonpy spinner thread exited cleanly.")
+    return True
 
-# Pseudo-thread
+class WebSocketThread(threading.Thread):
+    def __init__(self, port):
+        threading.Thread.__init__(self)
+        self.port = port
+        self.server = make_server('', self.port,
+            server_class=WSGIServer,
+            handler_class=WebSocketWSGIRequestHandler,
+            app=WebSocketWSGIApplication(handler_cls=EchoWebSocket))
+        self.server.initialize_websockets_manager()
+        self.logger = logging.getLogger("%s.WebSocketThread" % __name__)
+
+    def run(self):
+        self.logger.info("Starting WebSocket handler on port %s" % self.port)
+        # This is blocking until shutdown() request
+        self.server.serve_forever()
+        # After shutdown
+        self.server.server_close()
+        self.logger.info("Websocket Handler exited cleanly.")
+        return True
+
+    def request_shutdown(self):
+        self.server.shutdown()
+
+    # TODO: Check Safety Here
+    # TODO: Send compressed data here (transfer overhead to browser)
+    def broadcast(self, msg, binary):
+        self.server.manager.broadcast(json.dumps(msg), binary)
+
 class ZMQProcess(multiprocessing.Process):
     def __init__(self, cmd_endpoint, result_q):
         multiprocessing.Process.__init__(self)
@@ -435,4 +490,4 @@ class DimonSocket(DimonRESTBase):
         self.del_url = self.post_url
 
     def get_subscription_key(self):
-        return "%s:%s:%s" % (self.host, 'socket', 'socket')
+        return "%s:%s:%s" % (self.host, 'socket', '%s:%s' % (self.proto, self.port))

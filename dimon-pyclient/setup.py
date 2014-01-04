@@ -31,7 +31,7 @@ setup(
     packages = ['dimonpy'],
     url = 'TODO',
     license = 'LICENSE',
-    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python'],
+    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'ws4py'],
     description = 'TODO',
     scripts = [],
     test_suite = ''
