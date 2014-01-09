@@ -360,6 +360,12 @@ class DimonRESTBase(object):
         self.base_url = "http://%s:%s/dimon/v%s" % (host, http_port, __api__)
         self.logger = logging.getLogger("%s.DimonREST" % __name__)
         try:
+            # everyone can have a meta attached
+            self.meta = kwargs.get('meta', '')
+            if self.meta and not isinstance(self.meta, basestring):
+                self.meta = ''
+                self.logger.warning("Meta should be pure string. Ignorting it.")
+            # parse the rest
             self._parse_args(**kwargs)
         except KeyError:
             self.logger.error(self.parse_err)
@@ -375,7 +381,10 @@ class DimonRESTBase(object):
             if req_type == 'get':
                 r = requests.get(url, timeout=timeout)
             elif req_type == 'post':
-                r = requests.post(url, timeout=timeout)
+                r = requests.post(url,
+                    timeout=timeout,
+                    headers={'Content-type': 'application/json'},
+                    data=json.dumps({'meta': self.meta}))
             elif req_type == 'delete':
                 r = requests.delete(url, timeout=timeout)
         except requests.ConnectionError as e:
@@ -406,7 +415,7 @@ class DimonRESTBase(object):
     def get(self, path="", raise_error=True, timeout=None):
         return self._r('get', self.get_url + path, raise_error, timeout)
 
-    def start_monitor(self, raise_error=True, timeout=None,):
+    def start_monitor(self, raise_error=True, timeout=None):
         try:
             return self._r('post', self.post_url, raise_error, timeout)
         except requests.exceptions.HTTPError:
