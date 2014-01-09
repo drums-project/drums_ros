@@ -67,9 +67,10 @@ def init():
     if not ws_thread:
         __logger.info("Creating WebScoket thread for the first time.")
         # TODO: Change the port
-        ws_thread = WebSocketThread(8004)
-        ws_thread.daemon = True
-        ws_thread.start()
+        #ws_thread = WebSocketThread(8004)
+        #ws_thread.daemon = True
+        #ws_thread.start()
+        ws_thread = GraphitePublisher(2003)
 
     if not spinner_thread:
         spinner_thread = threading.Thread(target=__spin, args=())
@@ -131,7 +132,6 @@ def __spin():
             try:
                 with __ilock:
                     callback = __subs[sub_key]
-
                 msg = msgpack.loads(data)
                 callback(msg)
                 ws_thread.broadcast(msg, False)
@@ -141,6 +141,50 @@ def __spin():
             pass
     __logger.info("dimonpy spinner thread exited cleanly.")
     return True
+
+class GraphitePublisher():
+    def __init__(self, port):
+        self.ctx = zmq.Context()
+        self.sock = self.ctx.socket(zmq.STREAM)
+        self.port = port
+        self.logger = logging.getLogger("%s.graphite" % __name__)
+        self.timestamp = 0
+        try:
+            self.sock.connect('tcp://localhost:%s' % self.port)
+            self.id = self.sock.getsockopt(zmq.IDENTITY)
+            self.logger.info("Connected.")
+        except zmq.ZMQError, e:
+            self.logger.error('ZMQ Error %s', e)
+
+    def _send(self, d, path):
+        #self.logger.info("In send: %s" % (path,))
+        if isinstance(d, dict):
+            for key, val in d.items():
+                self._send(val, path + "." + key)
+        elif isinstance(d, list):
+            for index, val in enumerate(d):
+                self._send(val, path + "." + str(index))
+
+        elif isinstance(d, (int, long, float, complex)):
+            #self.logger.info("Sending %s : %s" % (path, d,))
+            self.sock.send(self.id, zmq.SNDMORE)
+            self.sock.send_string("%s %s %d\n" % (path, d, self.timestamp), zmq.SNDMORE)
+
+    def broadcast(self, message, binary=False):
+        try:
+            root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], message['key'])
+            root_key.replace(':', '.')
+            data = message['data']
+            self.timestamp = message['data']['timestamp']
+            self._send(data, root_key)
+        except KeyError, e:
+            self.logger.info("Key `%s` not found in %s." % (e, message))
+
+    def is_alive(self):
+        return False
+
+    def request_shutdown(self):
+        self.sock.close()
 
 class WebSocketThread(threading.Thread):
     def __init__(self, port):
