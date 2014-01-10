@@ -165,15 +165,21 @@ class GraphitePublisher():
             for index, val in enumerate(d):
                 self._send(val, path + "." + str(index))
 
-        elif isinstance(d, (int, long, float, complex)):
+        elif isinstance(d, (int, long, float, complex, basestring)):
             #self.logger.info("Sending %s : %s" % (path, d,))
             self.sock.send(self.id, zmq.SNDMORE)
             self.sock.send_string("%s %s %d\n" % (path, d, self.timestamp), zmq.SNDMORE)
 
     def broadcast(self, message, binary=False):
         try:
-            root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], message['key'])
-            root_key.replace(':', '.')
+            k = message['data'].get('meta', '')
+            if not k:
+                k = message['key']
+            if isinstance(k, list):
+                k = k[0]
+            k = str(k).replace(",", ".")
+            root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], k)
+            root_key = root_key.replace('/', ':')
             data = message['data']
             self.timestamp = message['data']['timestamp']
             self._send(data, root_key)
