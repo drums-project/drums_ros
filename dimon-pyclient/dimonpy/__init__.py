@@ -392,7 +392,11 @@ class DimonRESTBase(object):
                     headers={'Content-type': 'application/json'},
                     data=json.dumps({'meta': self.meta}))
             elif req_type == 'delete':
-                r = requests.delete(url, timeout=timeout)
+                #r = requests.delete(url, timeout=timeout)
+                r = requests.delete(url,
+                    timeout=timeout,
+                    headers={'Content-type': 'application/json'},
+                    data=json.dumps({'meta': self.meta}))
         except requests.ConnectionError as e:
             self.logger.error("DimoneRESTBase: Connection Error: %s" % e)
             return False
