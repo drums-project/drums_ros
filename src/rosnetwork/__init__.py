@@ -111,7 +111,6 @@ def diff_entity_lists(old, cur):
 
 class RosNetwork(Process):
     def __init__(self, default_interval, comm_queue):
-
         Process.__init__(self)
         assert default_interval > 0
         self._default_interval = default_interval
@@ -157,7 +156,7 @@ class RosNetwork(Process):
         return _succeed(node.getBusInfo(NODE_NAME))
 
     def update(self):
-        global __meta_map
+        global meta_map
         try:
             self._graph = rosgraph.impl.graph.Graph()
             self._graph.set_master_stale(5.0)
@@ -189,6 +188,11 @@ class RosNetwork(Process):
                         # l[1] is
                         # XMLRPC URI of Publisher for Subscribers
                         # CallerID (node name) of Subscriber for Publisher
+                        remote_node = l[1]
+                        if remote_node.find("http://") == 0:
+                            # If remote node is XMLRPC URI, find the node name
+                            remote_node = self._graph.uri_node_map.get(remote_node, remote_node)
+
                         self.links.append(
                             RosLink(
                                 conn_mode=l[3],
@@ -197,11 +201,12 @@ class RosNetwork(Process):
                                 local_node=n,
                                 local_host=host,
                                 local_port=local_port,
-                                remote_node=l[1],
+                                remote_node=remote_node,
                                 remote_host=remote_host,
                                 remote_port=remote_port))
-                    except AttributeError:
-                        print "AttributeError"
+                    except AttributeError, e:
+                        print "AttributeError `%s` for node `%s`" % (e, n)
+                        print l
                         pass#rospy.logwarn("The result of getBusInfo() does not include detailed bus information.")
                     except IndexError:
                         print "IndexError"

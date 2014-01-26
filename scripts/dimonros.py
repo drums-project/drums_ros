@@ -158,6 +158,7 @@ class ProcPublisher(object):
         self.publishers[path] = rospy.Publisher(path, String)
 
     def callback(self, data):
+        #print "callback for ", data['key']
         try:
             k = data['data'].get('meta', '')
             if not k:
@@ -172,9 +173,9 @@ class ProcPublisher(object):
                 else:
                     pub_meta = k[0].split(",")
                     k = "%s,topic,__mux__,%s,__mux__" % (pub_meta[0], pub_meta[3])
-            k = str(k).replace(",", "/") # TODO: WTF?
+            k = str(k).replace(",", "/").replace(".", "_").replace("-", "_") # TODO: WTF?
             path = self.create_path(
-                data['src'], data['type'], k)
+                data['src'].replace("-", "_"), data['type'], k)
         except KeyError:
             rospy.logwarn("Received data from Dimon is not in valid format.")
 
@@ -182,12 +183,10 @@ class ProcPublisher(object):
         self.publishers[path].publish(String(json.dumps(data['data'])))
 
 if __name__ == "__main__":
-
     def ros_callback(data):
         #print ">>>> ROS: %s" % threading.current_thread()
         pass
         #rospy.loginfo(data.data)
-
 
     dpy_logger = logging.getLogger('dimonpy')
     #dpy_logger.basicConfig('dimondpy.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
@@ -203,7 +202,7 @@ if __name__ == "__main__":
     proc_pub = ProcPublisher('/dimon')
 
     rosgraphmonitor_q = multiprocessing.Queue()
-    rn = rosnetwork.RosNetwork(3.0, rosgraphmonitor_q)
+    rn = rosnetwork.RosNetwork(10.0, rosgraphmonitor_q)
     rn.start()
 
     dt = ROS2DimonInterface(rosgraphmonitor_q, proc_pub.callback)
@@ -218,7 +217,7 @@ if __name__ == "__main__":
     #print ">>>> MAIN: %s" % threading.current_thread()
     try:
         while (not rospy.is_shutdown()) and (not dimonpy.is_shutdown()):
-            rospy.sleep(0.1)
+            rospy.sleep(1.0)
             #sub_key, callback = dimonpy.get_callback_queue().get(block=True)
             #rospy.loginfo(">>>>>>>>> %s" % sub_key)
     except IOError:
