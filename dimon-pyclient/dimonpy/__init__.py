@@ -19,6 +19,8 @@ import Queue
 import time
 import msgpack
 import json
+#import pickle
+#import struct
 
 from wsgiref.simple_server import make_server
 from ws4py.websocket import EchoWebSocket
@@ -165,10 +167,42 @@ class GraphitePublisher():
             for index, val in enumerate(d):
                 self._send(val, path + "." + str(index))
 
-        elif isinstance(d, (int, long, float, complex, basestring)):
+        elif isinstance(d, (int, long, float, complex)):
             #self.logger.info("Sending %s : %s" % (path, d,))
             self.sock.send(self.id, zmq.SNDMORE)
-            self.sock.send_string("%s %s %d\n" % (path, d, self.timestamp), zmq.SNDMORE)
+            self.sock.send_string("%s %s %s\n" % (path, d, self.timestamp), zmq.SNDMORE)
+
+    def _send_optimized(self, d, path):
+        stack = list()
+        stack.append((path, d["data"]))
+        buf = list()
+        while stack:
+            p, ref = stack.pop()
+            if isinstance(ref, dict):
+                it = ref.iteritems()
+            elif isinstance(ref, list):
+                it = enumerate(ref)
+            else:
+                continue
+            for key, val in it:
+                np = p + "." + str(key)
+                if isinstance(val, (int, long, float)):
+                    #print np, val
+                    #self.sock.send_string("")
+                    buf.append("%s %s %s\n" % (np, val, self.timestamp))
+                    #plain text seems smaller in our case
+                    #buf.append((np, (self.timestamp, val,),))
+                else:
+                    stack.append((np, val))
+
+
+        #payload = pickle.dumps(buf)
+        #header = struct.pack("!L", len(payload))
+
+        self.sock.send(self.id, zmq.SNDMORE)
+        self.sock.send_string("\n".join(buf))
+        del stack
+        del buf
 
     def broadcast(self, message, binary=False):
         try:
@@ -180,9 +214,11 @@ class GraphitePublisher():
             k = str(k).replace(",", ".")
             root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], k)
             root_key = root_key.replace('/', ':')
-            data = message['data']
+            #data = message['data']
             self.timestamp = message['data']['timestamp']
-            self._send(data, root_key)
+            #self._send(data, root_key)
+            self._send_optimized(message, root_key)
+
         except KeyError, e:
             self.logger.info("Key `%s` not found in %s." % (e, message))
 
@@ -443,6 +479,7 @@ class DimonRESTBase(object):
         self.logger.info("Trying to determine the 0mq publisher endpoint")
         try:
             zmq_endpoint = self.get_info()['zmq_publish']
+            #zmq_advertised_host =
         except KeyError:
             return False
         except:
@@ -519,11 +556,12 @@ class DimonLatency(DimonRESTBase):
         DimonRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
-        __host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
+        #__host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
+        __host_regex = re.compile('^(?![0-9]+$)(?!-)[a-zA-Z0-9-]{,63}(?<!-)$')
         __ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         self.target = kwargs['target']
         if not (__host_regex.match(self.target) or __ip_regex.match(self.target)):
-            self.parse_err = "DimonLatency: Invalid arguments, excepts valid `target` hostname or address"
+            self.parse_err = "DimonLatency: Invalid arguments, excepts valid `target` hostname or address. Input is %s" % (self.target,)
             raise KeyError
 
     def _update_url(self):
