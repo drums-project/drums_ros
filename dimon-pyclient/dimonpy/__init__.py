@@ -209,8 +209,16 @@ class GraphitePublisher():
             k = message['data'].get('meta', '')
             if not k:
                 k = message['key']
+
             if isinstance(k, list):
-                k = k[0]
+                assert len(k) > 0
+                if len(k) == 1:
+                    k = k[0]
+                else:
+                    # TODO
+                    pub_meta = k[0].split(",")
+                    k = "%s,topic,__mux__,%s,__mux__" % (pub_meta[0], pub_meta[3],)
+
             k = str(k).replace(",", ".")
             root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], k)
             root_key = root_key.replace('/', ':')
