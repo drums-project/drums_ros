@@ -90,7 +90,7 @@ class ROS2DimonInterface(threading.Thread):
         #topic, direction, local_host, local_node, local_port, remote_host, remote_node, remote_port, conn_mode = uid.split(',')
         local_host, conn_mode, direction, local_port, remote_port = uid.split(',')
         proto = "tcp" if conn_mode == "TCPROS" else "udp"
-        direction = "src" if direction == "i" else "dst"
+        direction = "dst" if direction == "i" else "src"
 
         task = dimonpy.DimonSocket(local_host, DIMON_PORT, proto='tcp',direction=direction, port=local_port, meta=meta)
         if task.register_callback(self.callback):

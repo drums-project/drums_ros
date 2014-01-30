@@ -50,26 +50,33 @@ class RosHost(RosEntity):
         self.set_uid(host, '')
 
 
+def deanonymize_node(name):
+    name_deanonymize, count = re.subn("_\d+$", "", name)
+    if count == 0:
+        return name
+    else:
+        return deanonymize_node(name_deanonymize)
+
 class RosNode(RosEntity):
-    def __init__(self, host, name, pid):
+    def __init__(self, host, name, pid, deanonymize=True):
         RosEntity.__init__(self)
+        self.name = deanonymize_node(name) if deanonymize else name
         self.host = host
-        self.name = name
         self.pid = pid
         uid = "%s,%s" % (host, pid)
-        meta = name
+        meta = self.name
         self.set_uid(uid, meta)
 
 class RosLink(RosEntity):
-    def __init__(self, conn_mode, topic, direction, local_node, local_host, local_port, remote_node, remote_host, remote_port):
+    def __init__(self, conn_mode, topic, direction, local_node, local_host, local_port, remote_node, remote_host, remote_port, deanonymize=True):
         RosEntity.__init__(self)
         self.conn_mode = conn_mode
         self.topic = topic
         self.direction = direction
-        self.local_node = local_node
+        self.local_node = deanonymize_node(local_node) if deanonymize else local_node
         self.local_host = local_host
         self.local_port = local_port
-        self.remote_node = remote_node
+        self.remote_node = deanonymize_node(remote_node) if deanonymize else remote_node
         self.remote_host = remote_host
         self.remote_port = remote_port
         uid = "%s,%s,%s,%s,%s" % (
@@ -84,7 +91,7 @@ class RosLink(RosEntity):
             self.topic,
             "to" if self.direction=='o' else "from",
             #remote_node.replace("http://", "").replace("/", ",").replace(":", ",")
-            remote_node.replace("http://", "").replace(":", "/")
+            self.remote_node.replace("http://", "").replace(":", "/")
             )
         self.set_uid(uid, meta)
 
@@ -205,11 +212,11 @@ class RosNetwork(Process):
                                 remote_host=remote_host,
                                 remote_port=remote_port))
                     except AttributeError, e:
-                        print "AttributeError `%s` for node `%s`" % (e, n)
-                        print l
+                        #print "AttributeError `%s` for node `%s`" % (e, n)
+                        #print l
                         pass#rospy.logwarn("The result of getBusInfo() does not include detailed bus information.")
                     except IndexError:
-                        print "IndexError"
+                        #print "IndexError"
                         pass#rospy.logwarn("Format error while parsing getBusInfo()")
                 time.sleep(0.01)
 
