@@ -220,7 +220,7 @@ class GraphitePublisher():
                     k = "%s,topic,__mux__,%s,__mux__" % (pub_meta[0], pub_meta[3],)
 
             k = str(k).replace(",", ".")
-            root_key = "dimon.%s.%s.%s" % (message['src'], message['type'], k)
+            root_key = "drums.%s.%s.%s" % (message['src'], message['type'], k)
             root_key = root_key.replace('/', ':')
             #data = message['data']
             self.timestamp = message['data']['timestamp']
