@@ -6,7 +6,7 @@ except ImportError:
     from distutils.core import setup
 
 def get_version():
-    INIT = os.path.abspath(os.path.join(os.path.dirname(__file__), 'dimonpy', '__init__.py'))
+    INIT = os.path.abspath(os.path.join(os.path.dirname(__file__), 'drumspy', '__init__.py'))
     f = open(INIT, 'r')
     try:
         for line in f:
@@ -24,11 +24,11 @@ def get_version():
 VERSION = get_version()
 
 setup(
-    name = 'dimonpy',
+    name = 'drumspy',
     version = VERSION,
     author = 'Mani Monajjemi',
     author_email = 'TODO',
-    packages = ['dimonpy'],
+    packages = ['drumspy'],
     url = 'TODO',
     license = 'LICENSE',
     install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'ws4py'],

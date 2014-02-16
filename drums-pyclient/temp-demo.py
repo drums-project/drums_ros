@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import dimonpy
+import drumspy
 import gevent
 import os
 import time
@@ -12,21 +12,21 @@ def clbk(d):
 
 logging.basicConfig(filename='/tmp/mani.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 
-dimonpy.init()
+drumspy.init()
 
 tasks = []
-tasks.append(dimonpy.DimonPID(MACHINE, 8001, pid = os.getpid()))
-tasks.append(dimonpy.DimonHost(MACHINE, 8001))
-tasks.append(dimonpy.DimonLatency(MACHINE, 8001, target = 'google.co.jp'))
-tasks.append(dimonpy.DimonLatency(MACHINE, 8001, target = 'newmarvin'))
-tasks.append(dimonpy.DimonSocket(MACHINE, 8001, proto = "udp", direction = "dst", port = 53))
+tasks.append(drumspy.DrumsPID(MACHINE, 8001, pid = os.getpid()))
+tasks.append(drumspy.DrumsHost(MACHINE, 8001))
+tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'google.co.jp'))
+tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'newmarvin'))
+tasks.append(drumspy.DrumsSocket(MACHINE, 8001, proto = "udp", direction = "dst", port = 53))
 
 for t in tasks:
     t.register_callback(clbk)
     t.start_monitor()
 
 try:
-    while not dimonpy.is_shutdown():
+    while not drumspy.is_shutdown():
         time.sleep(0.1)
 except KeyboardInterrupt:
     print "Keyboard Interrupt"
@@ -34,4 +34,4 @@ except KeyboardInterrupt:
 for t in tasks:
     t.stop_monitor()
 
-dimonpy.shutdown()
+drumspy.shutdown()

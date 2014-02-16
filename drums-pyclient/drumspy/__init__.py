@@ -45,7 +45,7 @@ __endpoint_keys = dict()
 # The single ZMQ_Process instant
 zmq_process = None
 zmq_cmd_sock = None
-ZMQ_CMD_ENDPOINT = "ipc://dimonpyc"
+ZMQ_CMD_ENDPOINT = "ipc://drumspyc"
 callback_queue = multiprocessing.Queue()
 
 # WebSocket Broadcaster
@@ -141,7 +141,7 @@ def __spin():
                 __logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
         except Queue.Empty:
             pass
-    __logger.info("dimonpy spinner thread exited cleanly.")
+    __logger.info("drumspy spinner thread exited cleanly.")
     return True
 
 class GraphitePublisher():
@@ -270,7 +270,7 @@ class ZMQProcess(multiprocessing.Process):
         self.cmd_endpoint = cmd_endpoint
         self.result_q = result_q
         self._terminate_event = multiprocessing.Event()
-        self.logger = logging.getLogger("%s.DimonZMQProcess" % __name__)
+        self.logger = logging.getLogger("%s.DrumsZMQProcess" % __name__)
         self.daemon = True
 
     def __repr__(self):
@@ -402,13 +402,13 @@ def killall():
         unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
-class DimonRESTBase(object):
+class DrumsRESTBase(object):
     def __init__(self, host, http_port, **kwargs):
         # TODO: Sanintize
         self.host = host
         self.http_port = http_port
-        self.base_url = "http://%s:%s/dimon/v%s" % (host, http_port, __api__)
-        self.logger = logging.getLogger("%s.DimonREST" % __name__)
+        self.base_url = "http://%s:%s/drums/v%s" % (host, http_port, __api__)
+        self.logger = logging.getLogger("%s.DrumsREST" % __name__)
         try:
             # everyone can have a meta attached
             self.meta = kwargs.get('meta', '')
@@ -442,10 +442,10 @@ class DimonRESTBase(object):
                     headers={'Content-type': 'application/json'},
                     data=json.dumps({'meta': self.meta}))
         except requests.ConnectionError as e:
-            self.logger.error("DimoneRESTBase: Connection Error: %s" % e)
+            self.logger.error("DrumseRESTBase: Connection Error: %s" % e)
             return False
         except requests.exceptions.Timeout as e:
-            self.logger.error("DimoneRESTBase: Timeout error: %s" % e)
+            self.logger.error("DrumseRESTBase: Timeout error: %s" % e)
             return False
         self.logger.debug("HTTP Status: %s" % r.status_code)
         if raise_error:
@@ -523,15 +523,15 @@ class DimonRESTBase(object):
     def get_subscription_key(self):
         raise NotImplementedError
 
-class DimonPID(DimonRESTBase):
+class DrumsPID(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
-        DimonRESTBase.__init__(self, host, http_port, **kwargs)
+        DrumsRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
         self.pid = int(kwargs['pid'])
         if (self.pid <= 0):
-            self.parse_err = "DimonPID: Invalid arguments, excepts pid and pid >= 0 ."
+            self.parse_err = "DrumsPID: Invalid arguments, excepts pid and pid >= 0 ."
             raise KeyError
 
     def _update_url(self):
@@ -542,9 +542,9 @@ class DimonPID(DimonRESTBase):
     def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'pid', self.pid)
 
-class DimonHost(DimonRESTBase):
+class DrumsHost(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
-        DimonRESTBase.__init__(self, host, http_port, **kwargs)
+        DrumsRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         self.parse_err = ""
@@ -559,9 +559,9 @@ class DimonHost(DimonRESTBase):
         return "%s:%s:%s" % (self.host, 'host', 'host')
 
 
-class DimonLatency(DimonRESTBase):
+class DrumsLatency(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
-        DimonRESTBase.__init__(self, host, http_port, **kwargs)
+        DrumsRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         #__host_regex = re.compile("(?=^.{1,254}$)(^(?:(?!\d|-)[a-zA-Z0-9\-]{1,63}(?<!-)\.?)+(?:[a-zA-Z]{2,})$)")
@@ -569,7 +569,7 @@ class DimonLatency(DimonRESTBase):
         __ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         self.target = kwargs['target']
         if not (__host_regex.match(self.target) or __ip_regex.match(self.target)):
-            self.parse_err = "DimonLatency: Invalid arguments, excepts valid `target` hostname or address. Input is %s" % (self.target,)
+            self.parse_err = "DrumsLatency: Invalid arguments, excepts valid `target` hostname or address. Input is %s" % (self.target,)
             raise KeyError
 
     def _update_url(self):
@@ -580,9 +580,9 @@ class DimonLatency(DimonRESTBase):
     def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'latency', self.target)
 
-class DimonSocket(DimonRESTBase):
+class DrumsSocket(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
-        DimonRESTBase.__init__(self, host, http_port, **kwargs)
+        DrumsRESTBase.__init__(self, host, http_port, **kwargs)
 
     def _parse_args(self, **kwargs):
         # TODO: Should we throw another exception?
@@ -590,7 +590,7 @@ class DimonSocket(DimonRESTBase):
         self.direction = kwargs['direction']
         self.port = int(kwargs['port'])
         if (self.port <= 0) or (not self.proto in ['tcp', 'udp']) or (not self.direction in ['bi', 'src', 'dst']):
-            self.parse_err = "DimonSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid port "
+            self.parse_err = "DrumsSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid port "
             raise KeyError
 
     def _update_url(self):
