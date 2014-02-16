@@ -22,7 +22,7 @@ try: #py3k
 except ImportError:
     import urlparse
 
-NODE_NAME = "dimonros"
+NODE_NAME = "drums_ros"
 
 # From rosnode
 def _succeed(args):

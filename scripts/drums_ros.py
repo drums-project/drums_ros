@@ -7,22 +7,21 @@ import json
 import rosnetwork
 import multiprocessing
 import threading
-import dimonpy
+import drumspy
 import logging
-import sys
 
-DIMON_PORT = 8001
+DRUMS_PORT = 8001
 
-class ROS2DimonInterface(threading.Thread):
-    def __init__(self, rosgraphmonitor_q, dimon_callback):
+class ROS2DrumsInterface(threading.Thread):
+    def __init__(self, rosgraphmonitor_q, drums_callback):
         threading.Thread.__init__(self)
         self.rosgraphmonitor_q = rosgraphmonitor_q
 
         self.terminate_event = threading.Event()
 
         self.all_hosts = set()
-        self.dimon_tasks = dict()
-        self.callback = dimon_callback
+        self.drums_tasks = dict()
+        self.callback = drums_callback
 
     def set_terminate_event(self):
         self.terminate_event.set()
@@ -31,21 +30,21 @@ class ROS2DimonInterface(threading.Thread):
         if not monitor_self and src == dst:
             return
         uid = "%s:%s" % (src, dst)
-        if uid in self.dimon_tasks:
+        if uid in self.drums_tasks:
             return
-        task = dimonpy.DimonLatency(src, DIMON_PORT, target=dst, meta=meta)
+        task = drumspy.DrumsLatency(src, DRUMS_PORT, target=dst, meta=meta)
         if task.register_callback(self.callback):
-            self.dimon_tasks[uid] = task
+            self.drums_tasks[uid] = task
             if not task.start_monitor():
                 rospy.logerr("Unable to start the latency monitoring task for `%s`" % (uid,))
         else:
-            rospy.logerr("Unable to connect to dimon-daemon at `%s:%s`" % (src, DIMON_PORT))
+            rospy.logerr("Unable to connect to drums-daemon at `%s:%s`" % (src, DRUMS_PORT))
 
     def add_new_host(self, host, meta):
-        task = dimonpy.DimonHost(host, DIMON_PORT, meta=meta)
+        task = drumspy.DrumsHost(host, DRUMS_PORT, meta=meta)
         if task.register_callback(self.callback):
             if task.start_monitor():
-                self.dimon_tasks[host] = task
+                self.drums_tasks[host] = task
                 self.all_hosts.add(host)
                 #Add new Latency Monitors
                 for h in self.all_hosts:
@@ -56,32 +55,32 @@ class ROS2DimonInterface(threading.Thread):
             else:
                 rospy.logerr("Unable to start the host monitoring task at `%s`" % (host,))
         else:
-            rospy.logerr("Unable to connect to dimon-daemon at `%s:%s`" % (host, DIMON_PORT))
+            rospy.logerr("Unable to connect to drums-daemon at `%s:%s`" % (host, DRUMS_PORT))
 
     def del_host(self, host):
         try:
-            self.dimon_tasks[host].stop_monitor()
-            del self.dimon_tasks[host]
+            self.drums_tasks[host].stop_monitor()
+            del self.drums_tasks[host]
             self.all_hosts.remove(host)
         except KeyError:
             rospy.logerr("Host %s not found!" % host)
 
     def add_new_node(self, uid, meta):
         host, pid = uid.split(',')
-        task = dimonpy.DimonPID(host, DIMON_PORT, pid=pid, meta=meta)
+        task = drumspy.DrumsPID(host, DRUMS_PORT, pid=pid, meta=meta)
         if task.register_callback(self.callback):
             if task.start_monitor():
-                self.dimon_tasks[uid] = task
+                self.drums_tasks[uid] = task
             else:
                 rospy.logerr("Unable to start the pid monitoring task for `%s` at `%s`" % (pid, host))
         else:
-            rospy.logerr("Unable to connect to dimon-daemon at `%s:%s`" % (host, DIMON_PORT))
+            rospy.logerr("Unable to connect to drums-daemon at `%s:%s`" % (host, DRUMS_PORT))
 
     def del_node(self, uid):
         host, pid = uid.split(',')
         try:
-            self.dimon_tasks[uid].stop_monitor()
-            del self.dimon_tasks[uid]
+            self.drums_tasks[uid].stop_monitor()
+            del self.drums_tasks[uid]
         except KeyError:
             rospy.logerr("pid:host %s:%s not found!"
                 % (host, pid))
@@ -92,21 +91,21 @@ class ROS2DimonInterface(threading.Thread):
         proto = "tcp" if conn_mode == "TCPROS" else "udp"
         direction = "dst" if direction == "i" else "src"
 
-        task = dimonpy.DimonSocket(local_host, DIMON_PORT, proto='tcp',direction=direction, port=local_port, meta=meta)
+        task = drumspy.DrumsSocket(local_host, DRUMS_PORT, proto='tcp',direction=direction, port=local_port, meta=meta)
         if task.register_callback(self.callback):
             if task.start_monitor():
-                self.dimon_tasks[uid] = task
+                self.drums_tasks[uid] = task
             else:
                 rospy.logerr("Unable to start the socket monitoring task for `%s:%s:%s` at `%s`" % (proto, direction, local_port, local_host))
         else:
-            rospy.logerr("Unable to connect to dimon-daemon at `%s:%s`" % (local_host, DIMON_PORT))
+            rospy.logerr("Unable to connect to drums-daemon at `%s:%s`" % (local_host, DRUMS_PORT))
 
     def del_link(self, uid):
         local_host, conn_mode, direction, local_port, remote_port = uid.split(',')
 
         try:
-            self.dimon_tasks[uid].stop_monitor()
-            del self.dimon_tasks[uid]
+            self.drums_tasks[uid].stop_monitor()
+            del self.drums_tasks[uid]
         except KeyError:
             rospy.logerr("Socket task %s:%s:%s on %s not found!"
                 % (conn_mode,direction,local_port,local_host)
@@ -134,14 +133,14 @@ class ROS2DimonInterface(threading.Thread):
                     self.del_link(uid)
 
         rospy.loginfo("Stopping All remote monitors ...")
-        length = len(self.dimon_tasks)
+        length = len(self.drums_tasks)
         index = 0
-        for uid, task in self.dimon_tasks.items():
+        for uid, task in self.drums_tasks.items():
             index += 1
             rospy.loginfo("[%s / %s] %s" % (index, length, uid))
             task.stop_monitor()
 
-        rospy.loginfo("ROS To Dimon Interface Thread exited cleanly")
+        rospy.loginfo("ROS To Drums Interface Thread exited cleanly")
         return True
 
 class ProcPublisher(object):
@@ -166,7 +165,7 @@ class ProcPublisher(object):
             if isinstance(k, list):
                 # This only happens for pub sockets
                 # TODO: Think about it
-                # meta is like this ["/talker,topic,/chatter,to,/dimonros", "/talker,topic,/rosout,to,/rosout"]
+                # meta is like this ["/talker,topic,/chatter,to,/drumsros", "/talker,topic,/rosout,to,/rosout"]
                 assert len(k) > 0
                 if len(k) == 1:
                     k = k[0]
@@ -177,7 +176,7 @@ class ProcPublisher(object):
             path = self.create_path(
                 data['src'].replace("-", "_"), data['type'], k)
         except KeyError:
-            rospy.logwarn("Received data from Dimon is not in valid format.")
+            rospy.logwarn("Received data from Drums is not in valid format.")
 
         self.create_new_pub_if_needed(path)
         self.publishers[path].publish(String(json.dumps(data['data'])))
@@ -188,37 +187,37 @@ if __name__ == "__main__":
         pass
         #rospy.loginfo(data.data)
 
-    dpy_logger = logging.getLogger('dimonpy')
-    #dpy_logger.basicConfig('dimondpy.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+    dpy_logger = logging.getLogger('drumspy')
+    #dpy_logger.basicConfig('drumsdpy.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
     #ch = logging.StreamHandler(sys.stdout)
-    hdlr = logging.FileHandler('dimondpy.log')
+    hdlr = logging.FileHandler('drumsdpy.log')
     formatter = logging.Formatter('%(asctime)s %(message)s')
     hdlr.setFormatter(formatter)
     #ch.setFormatter(formatter)
     dpy_logger.addHandler(hdlr)
 
 
-    rospy.init_node('dimonros')
-    proc_pub = ProcPublisher('/dimon')
+    rospy.init_node('drumsros')
+    proc_pub = ProcPublisher('/drums')
 
     rosgraphmonitor_q = multiprocessing.Queue()
+
+    dt = ROS2DrumsInterface(rosgraphmonitor_q, proc_pub.callback)
+    dt.start()
+
     rn = rosnetwork.RosNetwork(10.0, rosgraphmonitor_q)
     rn.start()
 
-    dt = ROS2DimonInterface(rosgraphmonitor_q, proc_pub.callback)
-    dt.start()
 
+    #rospy.Subscriber("chatter", String, ros_callback)
 
-
-    rospy.Subscriber("chatter", String, ros_callback)
-
-    dimonpy.init()
+    drumspy.init()
 
     #print ">>>> MAIN: %s" % threading.current_thread()
     try:
-        while (not rospy.is_shutdown()) and (not dimonpy.is_shutdown()):
+        while (not rospy.is_shutdown()) and (not drumspy.is_shutdown()):
             rospy.sleep(1.0)
-            #sub_key, callback = dimonpy.get_callback_queue().get(block=True)
+            #sub_key, callback = drumspy.get_callback_queue().get(block=True)
             #rospy.loginfo(">>>>>>>>> %s" % sub_key)
     except IOError:
         # This is becuse CTRL+C is caught in q.get(),
@@ -229,19 +228,19 @@ if __name__ == "__main__":
     except rospy.ROSInterruptException:
         pass
     finally:
+        rospy.loginfo("Trying to kill `%s`" % (rn, ))
+        rn.set_terminate_event()
+        rospy.loginfo("Waiting for process `%s` to finish." % (rn, ))
+        rn.join()
+
         rospy.loginfo("Trying to kill `%s`" % (dt, ))
         dt.set_terminate_event()
         rosgraphmonitor_q.put((0, 0, 0, 0))
         rospy.loginfo("Waiting for process `%s` to finish." % (dt, ))
         dt.join()
 
-        rospy.loginfo("Trying to kill `%s`" % (rn, ))
-        rn.set_terminate_event()
-        rospy.loginfo("Waiting for process `%s` to finish." % (rn, ))
-        rn.join()
-
-        if not dimonpy.is_shutdown():
-            rospy.loginfo("Killing dimonpy thread ...")
-            dimonpy.shutdown()
+        if not drumspy.is_shutdown():
+            rospy.loginfo("Killing drumspy thread ...")
+            drumspy.shutdown()
 
         rospy.loginfo("[bye]")

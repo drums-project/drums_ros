@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <package>
-  <name>dimonros</name>
+  <name>drums_ros/name>
   <version>0.1.0</version>
-  <description>The dimon-ros package</description>
+  <description>The drums_ros adapter</description>
 
-  <!-- One maintainer tag required, multiple allowed, one person per tag --> 
+  <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
   <!-- <maintainer email="jane.doe@example.com">Jane Doe</maintainer> -->
   <maintainer email="TODO@sfu.ca">Mani Monajjemi</maintainer>
@@ -19,7 +19,7 @@
   <!-- Url tags are optional, but mutiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/dimon-ros</url> -->
+  <!-- <url type="website">http://wiki.ros.org/drums-ros</url> -->
 
 
   <!-- Author tags are optional, mutiple are allowed, one per tag -->
