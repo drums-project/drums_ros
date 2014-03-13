@@ -1,9 +1,5 @@
 import os
-
-try:
-    from setuptools.core import setup
-except ImportError:
-    from distutils.core import setup
+from setuptools import setup, find_packages
 
 def get_version():
     INIT = os.path.abspath(os.path.join(os.path.dirname(__file__), 'drumspy', '__init__.py'))
@@ -25,12 +21,12 @@ VERSION = get_version()
 
 setup(
     name = 'drumspy',
-    version = VERSION,
-    author = 'Mani Monajjemi',
-    author_email = 'TODO',
-    packages = ['drumspy'],
-    url = 'TODO',
-    license = 'LICENSE',
+    version=VERSION,
+    author='Mani Monajjemi',
+    author_email='mmonajje@sfu.ca',
+    packages=find_packages(exclude=['test']),
+    url='http://autonomylab.org/drums/',
+    license='Apache License 2.0',
     install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'ws4py'],
     description = 'TODO',
     scripts = [],

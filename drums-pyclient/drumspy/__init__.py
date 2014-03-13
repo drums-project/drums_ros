@@ -1,6 +1,21 @@
 # -*- coding: utf-8 -*-
+"""
+Copyright 2013 Mani Monajjemi (AutonomyLab, Simon Fraser University)
 
-__version__ = "0.1.0"
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+"""
+
+__version__ = "0.9.0"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
@@ -27,122 +42,190 @@ from ws4py.websocket import EchoWebSocket
 from ws4py.server.wsgirefserver import WSGIServer, WebSocketWSGIRequestHandler
 from ws4py.server.wsgiutils import WebSocketWSGIApplication
 
-# Python does not provide a clean way to create signelton objects
-# All ASync stuff are part of the module's namespace directly.
+class Singleton(type):
+    """
+    A singleton metaclass.
+    From: http://c2.com/cgi/wiki?PythonSingleton
+    """
+    def __init__(cls, name, bases, dictionary):
+        super(Singleton, cls).__init__(name, bases, dictionary)
+        cls._instance = None
+        cls._lock = Lock()
 
-__ilock = threading.Lock()
+    def __call__(cls, *args, **kws):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(Singleton, cls).__call__(*args, **kws)
+        return cls._instance
 
-# Set of hosts (endpoints)
-__endpoints = set()
 
-# Map from sub_key to callback
-# key -> callback
-__subs = dict()
+class DrumsPy(Thread):
+    __metaclass__ = Singleton
+    def __init__(self):
+        Thread.__init__(self)
+        self.__ilock = threading.Lock()
+        # Set of hosts (endpoints)
+        self.__endpoints = set()
+        # Map from sub_key to callback
+        # key -> callback
+        self.__subs = dict()
+        # Map from hostnames (endpoints) to sub_keys
+        self.__endpoint_keys = dict()
+        # The single ZMQ_Process instant
+        self.zmq_process = None
+        self.zmq_cmd_sock = None
+        # TODO: Config
+        self.ZMQ_CMD_ENDPOINT = "ipc://drumspyc"
+        self.callback_queue = multiprocessing.Queue()
+        # WebSocket Broadcaster
+        self.ws_thread = None
 
-# Map from hostnames (endpoints) to sub_keys
-__endpoint_keys = dict()
+        self.terminate_event = Event()
+        self.is_running = Event()
+        self.daemon = True
 
-# The single ZMQ_Process instant
-zmq_process = None
-zmq_cmd_sock = None
-ZMQ_CMD_ENDPOINT = "ipc://drumspyc"
-callback_queue = multiprocessing.Queue()
+        self.logger = logging.getLogger(type(self).__name__)
+    
+    def init(self):
+        if not self.zmq_process:
+            self.logger.info("Creating zmq socket and process for the first time.")
+            ctx = zmq.Context()
+            self.zmq_cmd_sock = ctx.socket(zmq.PUSH)
+            self.zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
+            self.time.sleep(0.1)
+            self.zmq_process = ZMQProcess(self.ZMQ_CMD_ENDPOINT, self.callback_queue)
+            self.zmq_process.start()
 
-# WebSocket Broadcaster
-ws_thread = None
+        if not self.ws_thread:
+            self.logger.info("Creating WebScoket thread for the first time.")
+            self.ws_thread = GraphitePublisher(2003)
 
-spinner_thread = None
-__spinner_terminate_event = threading.Event()
+        
+        if not self.is_running.is_set():
+            self.logger.info("Starting drums client's thread ...")
+            self.start()
 
-def init():
-    global zmq_process, zmq_cmd_sock, spinner_thread, __ilock, ws_thread
-    __logger = logging.getLogger(__name__)
-    if not zmq_process:
-        __logger.info("Creating zmq socket and process for the first time.")
-        ctx = zmq.Context()
-        zmq_cmd_sock = ctx.socket(zmq.PUSH)
-        zmq_cmd_sock.bind(ZMQ_CMD_ENDPOINT)
-        time.sleep(0.1)
-        zmq_process = ZMQProcess(ZMQ_CMD_ENDPOINT, callback_queue)
-        zmq_process.start()
+    def is_shutdown(self):
+        return self.terminate_event.is_set()
 
-    if not ws_thread:
-        __logger.info("Creating WebScoket thread for the first time.")
-        # TODO: Change the port
-        #ws_thread = WebSocketThread(8004)
-        #ws_thread.daemon = True
-        #ws_thread.start()
-        ws_thread = GraphitePublisher(2003)
+    def __kill_zmq_prcoess(self):
+        while self.zmq_process.is_alive():
+            self.logger.info("ZMQ Process is still alive. Killing it.")
+            self.zmq_process.set_terminate_event()
+            self.zmq_cmd_sock.send_string('@@')
+            time.sleep(0.1)
+       self.logger.info("ZMQ Process is not alive any more.")
 
-    if not spinner_thread:
-        spinner_thread = threading.Thread(target=__spin, args=())
-        spinner_thread.daemon = True
-        spinner_thread.start()
+    def __kill_spinner_thread():
+        while self.is_alive():
+            self.logger.info("Spinner thread is still alive. Killing it.")
+            self.callback_queue.put(('__term__', '__term__'))
+            time.sleep(0.1)
 
-def is_shutdown():
-    return __spinner_terminate_event.is_set()
+    def __kill_ws_thread(self):
+        while self.ws_thread.is_alive():
+            self.logger.info("WebSocket Thread thread is still alive. Killing it.")
+            self.ws_thread.request_shutdown()
+            time.sleep(0.1)
 
-def __kill_zmq_prcoess():
-    global zmq_process
-    __logger = logging.getLogger(__name__)
-    while zmq_process.is_alive():
-        __logger.info("ZMQ Process is still alive. Killing it.")
-        zmq_process.set_terminate_event()
-        zmq_cmd_sock.send_string('@@')
-        time.sleep(0.1)
-    __logger.info("ZMQ Process is not alive any more.")
-
-def __kill_spinner_thread():
-    global spinner_thread
-    __logger = logging.getLogger(__name__)
-    while spinner_thread.is_alive():
-        __logger.info("Spinner thread is still alive. Killing it.")
-        callback_queue.put(('__term__', '__term__'))
-        time.sleep(0.1)
-
-def __kill_ws_thread():
-    global ws_thread
-    __logger = logging.getLogger(__name__)
-    while ws_thread.is_alive():
-        __logger.info("WebSocket Thread thread is still alive. Killing it.")
-        ws_thread.request_shutdown()
-        time.sleep(0.1)
-
-def shutdown():
-    __logger = logging.getLogger(__name__)
-    __logger.info("Shutting down spinner thread ...")
-    __kill_spinner_thread()
-    __logger.info("Shutting down WebSocketThread ...")
-    __kill_ws_thread()
-    __logger.info("Shutting down ZMQProcess ...")
-    __kill_zmq_prcoess()
+    def shutdown():
+        self.logger.info("Shutting down spinner thread ...")
+        self.__kill_spinner_thread()
+        self.logger.info("Shutting down WebSocketThread ...")
+        self.__kill_ws_thread()
+        self.logger.info("Shutting down ZMQProcess ...")
+        self.__kill_zmq_prcoess()
+        return True
 
 # This is blocking
-def __spin():
-    global __spinner_terminate_event, ws_thread
-    __logger = logging.getLogger(__name__)
-    while not __spinner_terminate_event.is_set():
-        try:
-            sub_key, data = callback_queue.get()
-            if sub_key == '__term__':
-                # ZMQ will automatically shutdown after all subscription
-                # and endpoints are removed
-                # ACK back to main thread to shutdown
-                __spinner_terminate_event.set()
-                __logger.info("I've been told to terminate. Setting TerminateEvent.")
-                continue
+    def run(self):
+        while not self.terminate_event.is_set():
             try:
-                with __ilock:
-                    callback = __subs[sub_key]
-                msg = msgpack.loads(data)
-                callback(msg)
-                ws_thread.broadcast(msg, False)
-            except KeyError:
-                __logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
-        except Queue.Empty:
-            pass
-    __logger.info("drumspy spinner thread exited cleanly.")
-    return True
+                sub_key, data = self.callback_queue.get()
+                if sub_key == '__term__':
+                    # ZMQ will automatically shutdown after all subscription
+                    # and endpoints are removed
+                    # ACK back to main thread to shutdown
+                    self.terminate_event.set()
+                    self.logger.info("I've been told to terminate. Setting TerminateEvent.")
+                    continue
+                try:
+                    with self.__ilock:
+                        callback = self.__subs[sub_key]
+                    msg = msgpack.loads(data)
+                    callback(msg)
+                    # TODO: Plugins
+                    self.ws_thread.broadcast(msg, False)
+                except KeyError:
+                    self.logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
+            except Queue.Empty:
+                pass
+        self.logger.info("drumspy spinner thread exited cleanly.")
+        return True
+   
+    def subscribe(self,endpoint, sub_key, callback):
+        cmd_str = ""
+        with self.__ilock:
+            if not endpoint in self.__endpoints:
+                self.__endpoints.add(endpoint)
+                self.__endpoint_keys[endpoint] = set()
+                e = endpoint
+            else:
+                e = ''
+
+            if sub_key in self.__endpoint_keys[endpoint]:
+                self.logger.warning("This key is already being monitored: %s. Unsubscribe first.", sub_key)
+                # TODO: fix this
+                return True
+            else:
+                self.__endpoint_keys[endpoint].add(sub_key)
+                self.__subs[sub_key] = callback
+                cmd_str = "sub@%s@%s" % (e, sub_key, )
+
+        if cmd_str:
+            self.zmq_cmd_sock.send_string(cmd_str)
+            return True
+        else:
+            return False
+
+    def unsubscribe(self, endpoint, sub_key):
+        with self.__ilock:
+            if not endpoint in self.__endpoint_keys:
+                self.logger.warning("Endpoint is not being monitored: %s.", endpoint)
+                return False
+            if (not sub_key in self.__endpoint_keys[endpoint]) or (not sub_key in self.__subs):
+                self.logger.warning("This key is not being monitored: %s.", sub_key)
+                return False
+
+            del self.__subs[sub_key]
+            self.__endpoint_keys[endpoint].remove(sub_key)
+            e = ''
+            if not self.__endpoint_keys[endpoint]:
+                self.__endpoints.remove(endpoint)
+                e = endpoint
+
+            kill_zmq = not __endpoints
+
+        cmd_str = "unsub@%s@%s" % (e, sub_key,)
+
+
+        # TODO: Fix this
+        #if kill_zmq:
+        #    __logger.info("ZMQ Process is not needed any more! Killing it ...")
+        #    zmq_process.set_terminate_event()
+        #    time.sleep(0.1)
+
+        zmq_cmd_sock.send_string(cmd_str)
+
+        return True
+
+    def killall(self):
+        with self.__ilock:
+            items = __subs.items()[:]
+
+        for sub_key, value in items:
+            self.unsubscribe(sub_key)
+
 
 class GraphitePublisher():
     def __init__(self, port):
@@ -236,33 +319,33 @@ class GraphitePublisher():
     def request_shutdown(self):
         self.sock.close()
 
-class WebSocketThread(threading.Thread):
-    def __init__(self, port):
-        threading.Thread.__init__(self)
-        self.port = port
-        self.server = make_server('', self.port,
-            server_class=WSGIServer,
-            handler_class=WebSocketWSGIRequestHandler,
-            app=WebSocketWSGIApplication(handler_cls=EchoWebSocket))
-        self.server.initialize_websockets_manager()
-        self.logger = logging.getLogger("%s.WebSocketThread" % __name__)
+# class WebSocketThread(threading.Thread):
+#     def __init__(self, port):
+#         threading.Thread.__init__(self)
+#         self.port = port
+#         self.server = make_server('', self.port,
+#             server_class=WSGIServer,
+#             handler_class=WebSocketWSGIRequestHandler,
+#             app=WebSocketWSGIApplication(handler_cls=EchoWebSocket))
+#         self.server.initialize_websockets_manager()
+#         self.logger = logging.getLogger("%s.WebSocketThread" % __name__)
 
-    def run(self):
-        self.logger.info("Starting WebSocket handler on port %s" % self.port)
-        # This is blocking until shutdown() request
-        self.server.serve_forever()
-        # After shutdown
-        self.server.server_close()
-        self.logger.info("Websocket Handler exited cleanly.")
-        return True
+#     def run(self):
+#         self.logger.info("Starting WebSocket handler on port %s" % self.port)
+#         # This is blocking until shutdown() request
+#         self.server.serve_forever()
+#         # After shutdown
+#         self.server.server_close()
+#         self.logger.info("Websocket Handler exited cleanly.")
+#         return True
 
-    def request_shutdown(self):
-        self.server.shutdown()
+#     def request_shutdown(self):
+#         self.server.shutdown()
 
-    # TODO: Check Safety Here
-    # TODO: Send compressed data here (transfer overhead to browser)
-    def broadcast(self, msg, binary):
-        self.server.manager.broadcast(json.dumps(msg), binary)
+#     # TODO: Check Safety Here
+#     # TODO: Send compressed data here (transfer overhead to browser)
+#     def broadcast(self, msg, binary):
+#         self.server.manager.broadcast(json.dumps(msg), binary)
 
 class ZMQProcess(multiprocessing.Process):
     def __init__(self, cmd_endpoint, result_q):
@@ -270,7 +353,7 @@ class ZMQProcess(multiprocessing.Process):
         self.cmd_endpoint = cmd_endpoint
         self.result_q = result_q
         self._terminate_event = multiprocessing.Event()
-        self.logger = logging.getLogger("%s.DrumsZMQProcess" % __name__)
+        self.logger = logging.getLogger(type(self).__name__)
         self.daemon = True
 
     def __repr__(self):
@@ -332,74 +415,7 @@ class ZMQProcess(multiprocessing.Process):
         self.logger.info("ZMQProcess exited cleanly.")
         return True
 
-def subscribe(endpoint, sub_key, callback):
-    global zmq_process, zmq_cmd_sock, __ilock
-    __logger = logging.getLogger(__name__)
-    cmd_str = ""
-    with __ilock:
-        if not endpoint in __endpoints:
-            __endpoints.add(endpoint)
-            __endpoint_keys[endpoint] = set()
-            e = endpoint
-        else:
-            e = ''
 
-        if sub_key in __endpoint_keys[endpoint]:
-            __logger.warning("This key is already being monitored: %s. Unsubscribe first.", sub_key)
-            # TODO: fix this
-            return True
-        else:
-            __endpoint_keys[endpoint].add(sub_key)
-            __subs[sub_key] = callback
-            cmd_str = "sub@%s@%s" % (e, sub_key, )
-
-    if cmd_str:
-        zmq_cmd_sock.send_string(cmd_str)
-        return True
-    else:
-        return False
-
-def unsubscribe(endpoint, sub_key):
-    global zmq_process, zmq_cmd_sock, __ilock
-    __logger = logging.getLogger(__name__)
-
-    with __ilock:
-        if not endpoint in __endpoint_keys:
-            __logger.warning("Endpoint is not being monitored: %s.", endpoint)
-            return False
-        if (not sub_key in __endpoint_keys[endpoint]) or (not sub_key in __subs):
-            __logger.warning("This key is not being monitored: %s.", sub_key)
-            return False
-
-        del __subs[sub_key]
-        __endpoint_keys[endpoint].remove(sub_key)
-        e = ''
-        if not __endpoint_keys[endpoint]:
-            __endpoints.remove(endpoint)
-            e = endpoint
-
-        kill_zmq = not __endpoints
-
-    cmd_str = "unsub@%s@%s" % (e, sub_key,)
-
-
-    # TODO: Fix this
-    #if kill_zmq:
-    #    __logger.info("ZMQ Process is not needed any more! Killing it ...")
-    #    zmq_process.set_terminate_event()
-    #    time.sleep(0.1)
-
-    zmq_cmd_sock.send_string(cmd_str)
-
-    return True
-
-def killall():
-    global __ilock
-    with __ilock:
-        items = __subs.items()[:]
-
-    for sub_key, value in items:
-        unsubscribe(sub_key)
 
 # Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
 class DrumsRESTBase(object):
