@@ -27,7 +27,7 @@ setup(
     packages=find_packages(exclude=['test']),
     url='http://autonomylab.org/drums/',
     license='Apache License 2.0',
-    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python', 'ws4py'],
+    install_requires = ['requests', 'pyzmq >= 2.2', 'msgpack-python'],
     description = 'TODO',
     scripts = [],
     test_suite = ''
