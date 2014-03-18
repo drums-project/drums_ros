@@ -10,14 +10,14 @@ MACHINE = 'bluemax'
 def clbk(d):
     print "[%s: %s: %s] @ %s" % (d['src'], d['type'], d['key'], d['data']['timestamp'])
 
-logging.basicConfig(filename='/tmp/mani.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
+logging.basicConfig(filename='dp.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 drumspy.init()
 
 tasks = []
 tasks.append(drumspy.DrumsPID(MACHINE, 8001, pid = os.getpid()))
 tasks.append(drumspy.DrumsHost(MACHINE, 8001))
-tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'google.co.jp'))
+#tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'google.co.jp'))
 tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'newmarvin'))
 tasks.append(drumspy.DrumsSocket(MACHINE, 8001, proto = "udp", direction = "dst", port = 53))
 
