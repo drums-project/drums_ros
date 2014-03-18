@@ -26,17 +26,7 @@ import re
 import logging
 import requests
 import errno
-
-# import time
-# import msgpack
 import json
-#import pickle
-#import struct
-
-#from wsgiref.simple_server import make_server
-#from ws4py.websocket import EchoWebSocket
-#from ws4py.server.wsgirefserver import WSGIServer, WebSocketWSGIRequestHandler
-#from ws4py.server.wsgiutils import WebSocketWSGIApplication
 
 # Singleton
 from _drumspy import DrumsPy
