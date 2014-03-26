@@ -23,6 +23,7 @@ import multiprocessing
 import logging
 import time
 import msgpack
+from Exporters import ExporterBase
 
 class Singleton(type):
     """
@@ -60,7 +61,7 @@ class DrumsPy(threading.Thread):
         self.ZMQ_CMD_ENDPOINT = "ipc://drumspyc"
         self.callback_queue = multiprocessing.Queue()
         # WebSocket Broadcaster
-        self.ws_thread = None
+        self.exporters = None
 
         self.terminate_event = threading.Event()
         self.is_running = threading.Event()
@@ -77,7 +78,7 @@ class DrumsPy(threading.Thread):
         self.zmq_process.start()
     
         self.logger.info("Creating WebScoket thread for the first time.")
-        self.ws_thread = GraphitePublisher(2003)
+        self.exporters = set()
 
         self.logger.info("Starting drums client's thread ...")
         self.start()
@@ -99,23 +100,26 @@ class DrumsPy(threading.Thread):
             self.callback_queue.put(('__term__', '__term__'))
             time.sleep(0.1)
 
-    def __kill_ws_thread(self):
-        return
-        while self.ws_thread.is_alive():
-            self.logger.info("WebSocket Thread thread is still alive. Killing it.")
-            self.ws_thread.request_shutdown()
-            time.sleep(0.1)
-
     def shutdown(self):
         self.logger.info("Shutting down spinner thread ...")
         self.__kill_spinner_thread()
-        self.logger.info("Shutting down WebSocketThread ...")
-        self.__kill_ws_thread()
+        self.logger.info("Cleaning up exporters ...")
+        for e in self.exporters:
+            e.cleanup()
+
         self.logger.info("Shutting down ZMQProcess ...")
         self.__kill_zmq_prcoess()
         return True
 
-# This is blocking
+
+    # TODO: Checking
+    def add_exporter(self, e):
+        if isinstance(e, ExporterBase):
+            self.exporters.add(e)
+        else:
+            raise ValueError("Invalid Exporter.")
+
+    # This is blocking
     def run(self):
         while not self.terminate_event.is_set():
             try:
@@ -133,7 +137,9 @@ class DrumsPy(threading.Thread):
                     msg = msgpack.loads(data)
                     callback(msg)
                     # TODO: Plugins
-                    self.ws_thread.broadcast(msg, False)
+                    for e in self.exporters:
+                        e.broadcast(msg, False)
+
                 except KeyError:
                     self.logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
             except Empty:

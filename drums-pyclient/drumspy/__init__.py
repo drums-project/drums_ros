@@ -35,6 +35,10 @@ def init():
     dp = DrumsPy()
     return True
 
+def add_exporter(e):
+    dp = DrumsPy()
+    dp.add_exporter(e)
+    
 def is_shutdown():
     dp = DrumsPy()
     return dp.is_shutdown()

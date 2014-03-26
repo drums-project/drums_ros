@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import drumspy
+from drumspy.Exporters.graphite import GraphiteExporter
 import gevent
 import os
 import time
@@ -13,6 +14,8 @@ def clbk(d):
 logging.basicConfig(filename='dp.log', level=logging.DEBUG, format='%(asctime)s %(message)s')
 
 drumspy.init()
+ge = GraphiteExporter(2003)
+drumspy.add_exporter(ge)
 
 tasks = []
 tasks.append(drumspy.DrumsPID(MACHINE, 8001, pid = os.getpid()))
