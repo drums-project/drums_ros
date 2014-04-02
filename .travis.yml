@@ -6,4 +6,4 @@ before_install:
 install: 
   - sh -c "cd drums-core && python setup.py install"
 script: 
-  - sh -c "cd drums-core && python setup.py test"
+  - sh -c "cd drums-core && sudo python setup.py test"
