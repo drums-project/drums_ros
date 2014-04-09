@@ -17,8 +17,9 @@ limitations under the License.
 
 import zmq
 import multiprocessing
-import Queue
 import logging
+import errno
+
 
 class ZMQProcess(multiprocessing.Process):
     def __init__(self, cmd_endpoint, result_q):
@@ -30,7 +31,7 @@ class ZMQProcess(multiprocessing.Process):
         self.daemon = True
 
     def __repr__(self):
-        name =  self.__class__.__name__
+        name = self.__class__.__name__
         return '<%s at %#x>' % (name, id(self))
 
     def set_terminate_event(self):
@@ -67,7 +68,8 @@ class ZMQProcess(multiprocessing.Process):
                             try:
                                 sub_sock.disconnect(endpoint)
                             except AttributeError:
-                                self.logger.warnings("ZMQ does not support disconnect.")
+                                self.logger.warnings(
+                                    "ZMQ does not support disconnect.")
                                 pass
 
                 if sub_sock in socks and socks[sub_sock] == zmq.POLLIN:

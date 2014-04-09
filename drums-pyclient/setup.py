@@ -20,7 +20,7 @@ def get_version():
 VERSION = get_version()
 
 setup(
-    name = 'drumspy',
+    name='drumspy',
     version=VERSION,
     author='Mani Monajjemi',
     author_email='mmonajje@sfu.ca',

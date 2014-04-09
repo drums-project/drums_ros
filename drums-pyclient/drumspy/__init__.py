@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __api__ = "1"
 version_info = tuple([int(num) for num in __version__.split('.')])
 
@@ -25,23 +25,28 @@ version_info = tuple([int(num) for num in __version__.split('.')])
 import re
 import logging
 import requests
-import errno
 import json
 
 # Singleton
 from _drumspy import DrumsPy
 
+# TODO: Is this the best way to hide the class from outside?
+
+
 def init():
     dp = DrumsPy()
-    return True
+    return dp
+
 
 def add_exporter(e):
     dp = DrumsPy()
     dp.add_exporter(e)
-    
+
+
 def is_shutdown():
     dp = DrumsPy()
     return dp.is_shutdown()
+
 
 def shutdown():
     dp = DrumsPy()
@@ -77,10 +82,8 @@ def shutdown():
 #         self.server.manager.broadcast(json.dumps(msg), binary)
 
 
-
-
-
-# Exceptions: http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
+# Exceptions:
+# http://www.python-requests.org/en/latest/api/#requests.exceptions.HTTPError
 class DrumsRESTBase(object):
     def __init__(self, host, http_port, **kwargs):
         # TODO: Sanintize
@@ -111,13 +114,15 @@ class DrumsRESTBase(object):
             if req_type == 'get':
                 r = requests.get(url, timeout=timeout)
             elif req_type == 'post':
-                r = requests.post(url,
+                r = requests.post(
+                    url,
                     timeout=timeout,
                     headers={'Content-type': 'application/json'},
                     data=json.dumps({'meta': self.meta}))
             elif req_type == 'delete':
                 #r = requests.delete(url, timeout=timeout)
-                r = requests.delete(url,
+                r = requests.delete(
+                    url,
                     timeout=timeout,
                     headers={'Content-type': 'application/json'},
                     data=json.dumps({'meta': self.meta}))
@@ -182,8 +187,11 @@ class DrumsRESTBase(object):
             self.zmq_endpoint = self.get_zmq_endpoint()
         if self.zmq_endpoint:
             self.async_key = self.get_subscription_key()
-            self.logger.info("Trying to subscribe to %s with key %s" % (self.zmq_endpoint, self.async_key))
-            return self.dp.subscribe(self.zmq_endpoint, self.async_key, callback)
+            self.logger.info(
+                "Trying to subscribe to %s with key %s" % (
+                    self.zmq_endpoint, self.async_key))
+            return self.dp.subscribe(
+                self.zmq_endpoint, self.async_key, callback)
         else:
             return False
 
@@ -203,6 +211,7 @@ class DrumsRESTBase(object):
     def get_subscription_key(self):
         raise NotImplementedError
 
+
 class DrumsPID(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
         DrumsRESTBase.__init__(self, host, http_port, **kwargs)
@@ -211,7 +220,8 @@ class DrumsPID(DrumsRESTBase):
         # TODO: Should we throw another exception?
         self.pid = int(kwargs['pid'])
         if (self.pid <= 0):
-            self.parse_err = "DrumsPID: Invalid arguments, excepts pid and pid >= 0 ."
+            self.parse_err = "DrumsPID: Invalid arguments, \
+            excepts pid and pid >= 0 ."
             raise KeyError
 
     def _update_url(self):
@@ -221,6 +231,7 @@ class DrumsPID(DrumsRESTBase):
 
     def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'pid', self.pid)
+
 
 class DrumsHost(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
@@ -248,8 +259,12 @@ class DrumsLatency(DrumsRESTBase):
         __host_regex = re.compile('^(?![0-9]+$)(?!-)[a-zA-Z0-9-]{,63}(?<!-)$')
         __ip_regex = re.compile("^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
         self.target = kwargs['target']
-        if not (__host_regex.match(self.target) or __ip_regex.match(self.target)):
-            self.parse_err = "DrumsLatency: Invalid arguments, excepts valid `target` hostname or address. Input is %s" % (self.target,)
+        if not (
+                __host_regex.match(self.target) or
+                __ip_regex.match(self.target)):
+            self.parse_err = "DrumsLatency: Invalid arguments, \
+            excepts valid `target` hostname or address. Input \
+            is %s" % (self.target,)
             raise KeyError
 
     def _update_url(self):
@@ -260,6 +275,7 @@ class DrumsLatency(DrumsRESTBase):
     def get_subscription_key(self):
         return "%s:%s:%s" % (self.host, 'latency', self.target)
 
+
 class DrumsSocket(DrumsRESTBase):
     def __init__(self, host, http_port, **kwargs):
         DrumsRESTBase.__init__(self, host, http_port, **kwargs)
@@ -269,14 +285,19 @@ class DrumsSocket(DrumsRESTBase):
         self.proto = kwargs['proto']
         self.direction = kwargs['direction']
         self.port = int(kwargs['port'])
-        if (self.port <= 0) or (not self.proto in ['tcp', 'udp']) or (not self.direction in ['bi', 'src', 'dst']):
-            self.parse_err = "DrumsSocket: Invalid arguments, excepts proto (tcp|udp), direction(bi|src|dst) and valid port "
+        if (
+                (self.port <= 0) or (not self.proto in ['tcp', 'udp'])
+                or (not self.direction in ['bi', 'src', 'dst'])):
+            self.parse_err = "DrumsSocket: Invalid arguments, excepts \
+            proto (tcp|udp), direction(bi|src|dst) and valid port "
             raise KeyError
 
     def _update_url(self):
         self.get_url = self.base_url + '/monitor/socket'
-        self.post_url = self.get_url + '/%s/%s/%s' % (self.proto, self.direction, self.port)
+        self.post_url = self.get_url + '/%s/%s/%s' % (
+            self.proto, self.direction, self.port)
         self.del_url = self.post_url
 
     def get_subscription_key(self):
-        return "%s:%s:%s" % (self.host, 'socket', '%s:%s' % (self.proto, self.port))
+        return "%s:%s:%s" % (
+            self.host, 'socket', '%s:%s' % (self.proto, self.port))

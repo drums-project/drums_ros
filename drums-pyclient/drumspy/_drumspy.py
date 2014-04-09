@@ -16,7 +16,7 @@ limitations under the License.
 """
 
 from _zmqp import ZMQProcess
-from Queue import Empty, Full
+from Queue import Empty
 import zmq
 import threading
 import multiprocessing
@@ -24,6 +24,7 @@ import logging
 import time
 import msgpack
 from Exporters import ExporterBase
+
 
 class Singleton(type):
     """
@@ -44,6 +45,7 @@ class Singleton(type):
 
 class DrumsPy(threading.Thread):
     __metaclass__ = Singleton
+
     def __init__(self):
         threading.Thread.__init__(self)
         self.__ilock = threading.Lock()
@@ -74,15 +76,16 @@ class DrumsPy(threading.Thread):
         self.zmq_cmd_sock = ctx.socket(zmq.PUSH)
         self.zmq_cmd_sock.bind(self.ZMQ_CMD_ENDPOINT)
         time.sleep(0.1)
-        self.zmq_process = ZMQProcess(self.ZMQ_CMD_ENDPOINT, self.callback_queue)
+        self.zmq_process = ZMQProcess(
+            self.ZMQ_CMD_ENDPOINT, self.callback_queue)
         self.zmq_process.start()
-    
+
         self.logger.info("Creating WebScoket thread for the first time.")
         self.exporters = set()
 
         self.logger.info("Starting drums client's thread ...")
         self.start()
-    
+
     def is_shutdown(self):
         return self.terminate_event.is_set()
 
@@ -111,7 +114,6 @@ class DrumsPy(threading.Thread):
         self.__kill_zmq_prcoess()
         return True
 
-
     # TODO: Checking
     def add_exporter(self, e):
         if isinstance(e, ExporterBase):
@@ -129,7 +131,8 @@ class DrumsPy(threading.Thread):
                     # and endpoints are removed
                     # ACK back to main thread to shutdown
                     self.terminate_event.set()
-                    self.logger.info("I've been told to terminate. Setting TerminateEvent.")
+                    self.logger.info(
+                        "I've been told to terminate. Setting TerminateEvent.")
                     continue
                 try:
                     with self.__ilock:
@@ -141,13 +144,15 @@ class DrumsPy(threading.Thread):
                         e.broadcast(msg, False)
 
                 except KeyError:
-                    self.logger.error("Subscription key `%s` in Queue does not exist! It might have been unsubscribed." % (sub_key, ))
+                    self.logger.error(
+                        "Subscription key `%s` in Queue does not exist!\
+                         It might have been unsubscribed." % (sub_key, ))
             except Empty:
                 pass
         self.logger.info("drumspy spinner thread exited cleanly.")
         return True
-   
-    def subscribe(self,endpoint, sub_key, callback):
+
+    def subscribe(self, endpoint, sub_key, callback):
         cmd_str = ""
         with self.__ilock:
             if not endpoint in self.__endpoints:
@@ -158,7 +163,9 @@ class DrumsPy(threading.Thread):
                 e = ''
 
             if sub_key in self.__endpoint_keys[endpoint]:
-                self.logger.warning("This key is already being monitored: %s. Unsubscribe first.", sub_key)
+                self.logger.warning(
+                    "This key is already being monitored: %s.\
+                     Unsubscribe first.", sub_key)
                 # TODO: fix this
                 return True
             else:
@@ -175,10 +182,14 @@ class DrumsPy(threading.Thread):
     def unsubscribe(self, endpoint, sub_key):
         with self.__ilock:
             if not endpoint in self.__endpoint_keys:
-                self.logger.warning("Endpoint is not being monitored: %s.", endpoint)
+                self.logger.warning(
+                    "Endpoint is not being monitored: %s.", endpoint)
                 return False
-            if (not sub_key in self.__endpoint_keys[endpoint]) or (not sub_key in self.__subs):
-                self.logger.warning("This key is not being monitored: %s.", sub_key)
+            if (
+                    (not sub_key in self.__endpoint_keys[endpoint]) or
+                    (not sub_key in self.__subs)):
+                self.logger.warning(
+                    "This key is not being monitored: %s.", sub_key)
                 return False
 
             del self.__subs[sub_key]
@@ -188,28 +199,25 @@ class DrumsPy(threading.Thread):
                 self.__endpoints.remove(endpoint)
                 e = endpoint
 
-            kill_zmq = not self.__endpoints
+            # TODO: check this
+            #kill_zmq = not self.__endpoints
 
         cmd_str = "unsub@%s@%s" % (e, sub_key,)
-
 
         # TODO: Fix this
         #if kill_zmq:
         #    __logger.info("ZMQ Process is not needed any more! Killing it ...")
         #    zmq_process.set_terminate_event()
         #    time.sleep(0.1)
-
         self.zmq_cmd_sock.send_string(cmd_str)
-
         return True
 
     def killall(self):
         with self.__ilock:
-            items = __subs.items()[:]
+            items = self.__subs.items()[:]
 
         for sub_key, value in items:
             self.unsubscribe(sub_key)
-
 
 
 class GraphitePublisher():
@@ -238,7 +246,8 @@ class GraphitePublisher():
         elif isinstance(d, (int, long, float, complex)):
             #self.logger.info("Sending %s : %s" % (path, d,))
             self.sock.send(self.id, zmq.SNDMORE)
-            self.sock.send_string("%s %s %s\n" % (path, d, self.timestamp), zmq.SNDMORE)
+            self.sock.send_string(
+                "%s %s %s\n" % (path, d, self.timestamp), zmq.SNDMORE)
 
     def _send_optimized(self, d, path):
         stack = list()
@@ -263,7 +272,6 @@ class GraphitePublisher():
                 else:
                     stack.append((np, val))
 
-
         #payload = pickle.dumps(buf)
         #header = struct.pack("!L", len(payload))
 
@@ -285,7 +293,8 @@ class GraphitePublisher():
                 else:
                     # TODO
                     pub_meta = k[0].split(",")
-                    k = "%s,topic,__mux__,%s,__mux__" % (pub_meta[0], pub_meta[3],)
+                    k = "%s,topic,__mux__,%s,__mux__" % (
+                        pub_meta[0], pub_meta[3],)
 
             k = str(k).replace(",", ".")
             root_key = "drums.%s.%s.%s" % (message['src'], message['type'], k)
