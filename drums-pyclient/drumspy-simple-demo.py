@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import drumspy
 from drumspy.Exporters.graphite import GraphiteExporter
-import gevent
 import os
 import time
 import logging
@@ -21,7 +20,7 @@ tasks = []
 tasks.append(drumspy.DrumsPID(MACHINE, 8001, pid = os.getpid()))
 tasks.append(drumspy.DrumsHost(MACHINE, 8001))
 #tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'google.co.jp'))
-tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'newmarvin'))
+tasks.append(drumspy.DrumsLatency(MACHINE, 8001, target = 'kitt'))
 tasks.append(drumspy.DrumsSocket(MACHINE, 8001, proto = "udp", direction = "dst", port = 53))
 
 for t in tasks:
@@ -30,7 +29,7 @@ for t in tasks:
 
 try:
     while not drumspy.is_shutdown():
-        time.sleep(0.1)
+        time.sleep(1.0)
 except KeyboardInterrupt:
     print "Keyboard Interrupt"
 
