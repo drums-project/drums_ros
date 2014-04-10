@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 ## ! DO NOT MANUALLY INVOKE THIS setup.py, USE CATKIN INSTEAD
 # From: http://wiki.ros.org/rospy_tutorials/Tutorials/Makefile
 from distutils.core import setup
@@ -8,7 +9,8 @@ setup_args = generate_distutils_setup(
     packages=['rosnetwork'],
     package_dir={'': 'src'},
     scripts={'scripts/drums_ros.py'},
-    requires=['drumspy', 'roslib', 'rospy', 'rospy_message_converter']
+    requires=['drumspy >= 0.9', 'roslib', 'rospy', 'rospy_message_converter', 'diagnostic_updater']
+    #requires=['drumspy >= 0.9']
 )
 
 setup(**setup_args)
