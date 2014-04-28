@@ -9,7 +9,7 @@ setup_args = generate_distutils_setup(
     packages=['rosnetwork'],
     package_dir={'': 'src'},
     scripts={'scripts/drums_ros.py'},
-    requires=['drumspy >= 0.9', 'roslib', 'rospy', 'rospy_message_converter', 'diagnostic_updater']
+    requires=['drumspy', 'roslib', 'rospy', 'rospy_message_converter', 'diagnostic_updater']
     #requires=['drumspy >= 0.9']
 )
 
