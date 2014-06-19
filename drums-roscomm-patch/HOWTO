@@ -1,0 +1,127 @@
+The `transport_info` patch has been merged into _indigo_devel_. The commit hash is: 6980ae43fc50fee7227b5326db7b230c803777bb (More info: https://github.com/ros/ros_comm/pull/328)
+
+The plan is apply the patch to latest released tag in _hydro-devel_.
+
+$ aptitude show ros-hydro-roscpp
+Version: 1.10.2-0precise-20140304-0105-+0000
+
+$ Make sure upstream changes are merged in.
+$ git git checkout -b 1.10.2-ti 1.10.2
+$ git cherry-pick 6980ae43fc50fee7227b5326db7b230c803777bb
+
+This should take the patch and apply that to 1.10.2-ti. In order to make this, we also need the correlated roscpp_core tag in the workspace.
+
+$ cd ~/catkin_ws/src
+$ git clone https://github.com/ros/roscpp_core
+$ checkout 0.4.3 <Find this either using aptitude or github>
+
+The plan is to first make tag 1.10.2 and then 1.10.2-ti and make a diff. To be sure, it is better to diff local 1.10.2 binaries with ros hyrdo and groovy binaries.
+
+1) 
+$ cd src/roscpp folder, 
+$ git checkout 1.10.2 
+$ cd ~/catkin_ws
+$ catkin_make clean
+$ catkin_make
+$ catkin_make install
+$ mv install install-1.10.2
+
+2) 
+$ cd src/roscpp folder, 
+$ git checkout 1.10.2-ti
+$ cd ~/catkin_ws
+$ catkin_make clean
+$ catkin_make
+$ catkin_make install
+$ mv install install-1.10.2-ti
+
+This should look like a reasonabe diff:
+
+$ diff -rq install-1.10.2 install-1.10.2-ti | grep -vF -e "/msg/" -e "/srv/"
+
+$ diff -rq install-1.10.2 install-1.10.2-ti | grep -vF -e "/msg/" -e "/srv/" | cut -d " " -f4
+
+install-1.10.2-ti/include/ros/intraprocess_publisher_link.h
+install-1.10.2-ti/include/ros/intraprocess_subscriber_link.h
+install-1.10.2-ti/include/ros/publisher_link.h
+install-1.10.2-ti/include/ros/subscriber_link.h
+install-1.10.2-ti/include/ros/transport/transport_tcp.h
+install-1.10.2-ti/include/ros/transport/transport_udp.h
+install-1.10.2-ti/include/ros/transport_publisher_link.h
+install-1.10.2-ti/include/ros/transport_subscriber_link.h
+install-1.10.2-ti/lib/libroscpp.so
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/tcpros_base.py
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/tcpros_base.pyc
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.py
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.pyc
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/transport.py
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/impl/transport.pyc
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/topics.py
+install-1.10.2-ti/lib/python2.7/dist-packages/rospy/topics.pyc
+
+If everything looks good:
+
+$ diff -rq install-1.10.2 install-1.10.2-ti | grep -vF -e "/msg/" -e "/srv/" | cut -d " " -f4 | xargs -L1 -I {} cp --parents {} ~/Dev/drums/drums-roscomm-patch/
+
+Double check the results:
+
+$ cd ~/Dev/drums/drums-roscomm-patch/ && find .
+
+.
+./include
+./include/ros
+./include/ros/intraprocess_subscriber_link.h
+./include/ros/publisher_link.h
+./include/ros/subscriber_link.h
+./include/ros/intraprocess_publisher_link.h
+./include/ros/transport
+./include/ros/transport/transport_udp.h
+./include/ros/transport/transport_tcp.h
+./include/ros/transport_subscriber_link.h
+./include/ros/transport_publisher_link.h
+./lib
+./lib/libroscpp.so
+./lib/python2.7
+./lib/python2.7/dist-packages
+./lib/python2.7/dist-packages/rospy
+./lib/python2.7/dist-packages/rospy/topics.py
+./lib/python2.7/dist-packages/rospy/impl
+./lib/python2.7/dist-packages/rospy/impl/tcpros_base.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_base.pyc
+./lib/python2.7/dist-packages/rospy/impl/transport.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.pyc
+./lib/python2.7/dist-packages/rospy/impl/transport.pyc
+./lib/python2.7/dist-packages/rospy/topics.pyc
+
+I dumped the above output to list.txt file without the redundant parts. Then I wrote a python script to do the patch per file.
+
+- How to Manually install one file:
+
+sudo ./drums-roscomm-patch.py -i include/ros/publisher_link.h -distro hydro --prefix install-1.10.2-ti --backup
+
+- How to manually restore backup?
+
+sudo ./drums-roscomm-patch.py -i include/ros/publisher_link.h -distro hydro --prefix backup/<version>/opt/ros/hydro
+
+- How to check differences:
+
+cat list.txt | xargs -L1 -I {} diff -q /opt/ros/hydro/{} install-1.10.2-ti/{}
+
+- How to batch patch?
+
+sudo ./patch.sh install-1.10.2-ti hydro --backup
+
+(After the succesfull patch, the diff command above should return nothing.)
+
+- How to bacth restore?
+
+-- Method 1: sudo ./patch.sh backup/15012014/opt/ros/hydro hydro
+-- Method 2: sudo aptitude reinstall ros-hydro-roscpp ros-hydro-rospy
+
+### roscpp and roscpp_core correlated stable tags
+
+1.9.50 0.3.16
+1.9.53 0.3.17
+1.9.54 0.3.17
+1.10.2  0.4.3

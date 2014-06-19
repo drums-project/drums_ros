@@ -1,0 +1,113 @@
+Plan for updating roscpp binaries:
+
+Check Current roscpp stable version:
+
+$ sudo aptitude show ros-hydro-roscpp | grep Version
+Version: 1.9.50-0precise-20131015-1959-+0000
+
+$ sudo aptitude show ros-groovy-roscpp | grep Version
+Version: 1.9.50-0precise-20131015-2117-+0000
+
+$ sudo aptitude show ros-hydro-rospy | grep Version
+Version: 1.9.50-0precise-20131015-1940-+0000
+
+$ sudo aptitude show ros-groovy-rospy | grep Version
+Version: 1.9.50-0precise-20131015-2028-+0000
+
+My modifications to roscpp and rospy are in `transport_info` branch of this repo: https://github.com/mani-monaj/ros_comm/tree/transport_info
+
+The changes on top of 1.9.50 stable tag are from 2885a199145bc17b6c38a0b99e9efc73a28eedc8 [tag 1.9.50] to 340f0c90155e1dec4aad23c02bb58d5af135b42f . Therefore commit 340f0c90 is minimal changes on top of current version of roscpp.
+
+git diff 1.9.50 340f0c9 > transport_info.patch
+cp transport_info.patch ~/Dev/drums/drums-roscomm-patch/transport_info.patch
+
+Let's create a branch from the latest stable tag and patch the sourec files:
+
+git checkout -b 1.9.53-ti 1.9.53
+git apply ~/Dev/drums/drums-roscomm-patch/transport_info.patch
+git commit -am "transport_info patch to 1.9.53"
+git push origin 1.9.53-ti
+
+
+The plan is to first make tag 1.9.53 and then 1.9.53-ti and make a diff. To be sure, it is better to diff local 1.9.53 binaries with ros hyrdo and groovy binaries.
+
+IMPORTANT NOTE: roscpp depends on all ROS packages from roscpp_core. So in the catkin_ws we also need the latest stable roscpp_core files:
+
+$ cd ~/catkin_ws/src
+$ git clone https://github.com/ros/roscpp_core
+$ checkout 0.3.17 <Find this either using aptitude or github>
+
+1) cd src/roscpp folder, git checkout 1.9.53, cd ~/catkin_ws, catkin_make clean, catkin_make, catkin_make install, mv install install-1.9.53
+2) cd src/roscpp folder, git checkout 1.9.53-ti, cd ~/catkin_ws, catkin_make clean, catkin_make, catkin_make install, mv install install-1.9.53-ti
+
+This looks like a reasonabe diff:
+
+$ diff -rq install-1.9.53 install-1.9.53-ti | grep -vF -e "/msg/" -e "/srv/"
+
+
+Let's copy the files somewhere safe first:
+
+mkdir drums-roscomm-patch
+diff -rq install-1.9.53 install-1.9.53-ti | grep -vF -e "/msg/" -e "/srv/" | cut -d " " -f4 | xargs -L1 -I {} cp --parents {} ~/Dev/drums/drums-roscomm-patch/
+
+All done:
+
+$ cd ~/Dev/drums/drums-roscomm-patch/install-1.9.53-ti && find .
+
+find .
+.
+./include
+./include/ros
+./include/ros/intraprocess_subscriber_link.h
+./include/ros/publisher_link.h
+./include/ros/subscriber_link.h
+./include/ros/intraprocess_publisher_link.h
+./include/ros/transport
+./include/ros/transport/transport_udp.h
+./include/ros/transport/transport_tcp.h
+./include/ros/transport_subscriber_link.h
+./include/ros/transport_publisher_link.h
+./lib
+./lib/libroscpp.so
+./lib/python2.7
+./lib/python2.7/dist-packages
+./lib/python2.7/dist-packages/rospy
+./lib/python2.7/dist-packages/rospy/topics.py
+./lib/python2.7/dist-packages/rospy/impl
+./lib/python2.7/dist-packages/rospy/impl/tcpros_base.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_base.pyc
+./lib/python2.7/dist-packages/rospy/impl/transport.py
+./lib/python2.7/dist-packages/rospy/impl/tcpros_pubsub.pyc
+./lib/python2.7/dist-packages/rospy/impl/transport.pyc
+./lib/python2.7/dist-packages/rospy/topics.pyc
+
+I dumped the above output to list.txt file without the redundant parts. Then I wrote a python script to do the patch per file.
+
+- How to Manually install one file:
+
+sudo ./drums-roscomm-patch.py -i include/ros/publisher_link.h -distro hydro --prefix install-340f0c90 --backup
+
+- How to manually restore backup?
+
+sudo ./drums-roscomm-patch.py -i include/ros/publisher_link.h -distro hydro --prefix backup/<version>/opt/ros/hydro
+
+- How to check differences:
+
+cat list.txt | xargs -L1 -I {} diff /opt/ros/hydro/{} install-340f0c90/{}
+
+- How to batch patch?
+
+sudo ./patch.sh install-340f0c90 hydro --backup
+
+- How to bacth restore?
+
+-- Method 1: sudo ./patch.sh backup/15012014/opt/ros/hydro hydro
+-- Method 2: sudo aptitude reinstall ros-hydro-roscpp ros-hydro-rospy
+
+### roscpp and roscpp_core correlated stable tags
+
+1.9.50 0.3.16
+1.9.53 0.3.17
+1.9.54 0.3.17
+1.10.2	0.4.3
