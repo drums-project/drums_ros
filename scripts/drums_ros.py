@@ -32,6 +32,7 @@ import logging
 import rosnetwork
 import drumspy
 from drumspy.Exporters import ExporterBase
+from drumspy.Exporters.graphite import GraphiteExporter
 
 # TODO: Parameterize me
 DRUMS_PORT = 8001
@@ -318,6 +319,11 @@ if __name__ == "__main__":
     diag_updater.setHardwareID("none")
     diag_interface = DiagnosticsExporter()
     diag_updater.add("drums", diag_interface.produce)
+
+    if rospy.get_param("~export_graphite", False):
+        rospy.loginfo("Graphite Exported Enabled at Port 2013")
+        ge = GraphiteExporter(2013)
+        drumspy.add_exporter(ge)
 
     rosgraphmonitor_q = multiprocessing.Queue()
 
