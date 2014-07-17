@@ -1,7 +1,7 @@
-*.py[cod]
-
 # C extensions
 *.so
+*.py[co]
+*~
 
 # Packages
 *.egg
@@ -34,3 +34,9 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+MANIFEST
+
+*.DS_Store
+deb_dist
+.fuse_*
