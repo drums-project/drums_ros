@@ -238,14 +238,18 @@ class ROS2DrumsInterface(threading.Thread):
 #         self.publishers[path].publish(String(json.dumps(data['data'])))
 
 class DiagnosticsExporter(object):
-    def __init__(self):
+    def __init__(self, updater):
         # List of key, values
-        #self.updater = updater
+        self.updater = updater
         self.cache = dict()
         self.lock = threading.Lock()
 
+        # to keep track of the drums items already added to the updater
+        self.updater_cache = dict()
+
     # Internal Usage
     def _cache_optimized(self, d, path):
+        new_entry = False
         stack = list()
         stack.append((path, d["data"]))
         while stack:
@@ -261,12 +265,16 @@ class DiagnosticsExporter(object):
                 if isinstance(val, (int, long, float)):
                     #print np, val
                     #self.sock.send_string("")
+                    if not self.cache.get(np, False):
+                        new_entry = np
                     with self.lock:
                         self.cache[np] = val
                     #plain text seems smaller in our case
                     #buf.append((np, (self.timestamp, val,),))
                 else:
                     stack.append((np, val))
+
+        return new_entry
 
     # This is called by drumspy
     def broadcast(self, message, binary=False):
@@ -291,7 +299,11 @@ class DiagnosticsExporter(object):
             #data = message['data']
             #self.timestamp = message['data']['timestamp']
             #self._send(data, root_key)
-            self._cache_optimized(message, root_key)
+            new_entry = self._cache_optimized(message, root_key)
+
+            if new_entry and not self.updater_cache.get(new_entry, False):
+                self.updater.add(new_entry, self.produce)
+                self.updater_cache[new_entry] = new_entry
 
         except KeyError, e:
             self.logger.info("Key `%s` not found in %s." % (e, message))
@@ -299,10 +311,8 @@ class DiagnosticsExporter(object):
     # This is called by diagnostics updater
     def produce(self, stat):
         with self.lock:
-            for (np, val) in self.cache.items():
-                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.OK, np)
-                stat.add(np, val)
-
+            stat.summary(diagnostic_msgs.msg.DiagnosticStatus.OK, stat.name)
+            stat.add(stat.name, self.cache[stat.name])
         return stat
 
 if __name__ == "__main__":
@@ -315,10 +325,11 @@ if __name__ == "__main__":
 
     rospy.init_node('drumsros')
     drumspy.init()
-    diag_updater = diagnostic_updater.Updater()
-    diag_updater.setHardwareID("none")
-    diag_interface = DiagnosticsExporter()
-    diag_updater.add("drums", diag_interface.produce)
+
+    if rospy.get_param("~export_diagnostics", True):
+        diag_updater = diagnostic_updater.Updater()
+        diag_updater.setHardwareID("none")
+        diag_interface = DiagnosticsExporter(diag_updater)
 
     if rospy.get_param("~export_graphite", False):
         rospy.loginfo("Graphite Exported Enabled at Port 2013")
