@@ -5,7 +5,7 @@ My Setup: Ubuntu 14.04.3, ROS Indigo
 
 ## Setup and run drums-daemon locally (no system-wide installation for testing)
 
-For system-wide installation check [this guide](http://drums-project.github.io/drums_daemon.html#installation).
+For the ystem-wide installation guide, check [this guide](http://drums-project.github.io/drums_daemon.html#installation).
 
 ```
 sudo apt-get install python-virtualenv python-pip libpcap-dev
@@ -59,7 +59,7 @@ $ rosrun drums_ros drums_ros.py _export_diagnostics:=True _export_graphite:=True
 [INFO] [WallTime: 1455910043.098903] Event: link, new, sektor,TCPROS,o,33510,48109, /drumsros,topic,/rosout,to,/rosout
 ```
 
-drums_ros now monitors your ROS network and talks to every drums-daemon on the network, issues monitoring tasks automatically and aggregates the data and exports them to both ROS diagnostics and Graphite (TCP Port 2013)
+`drums_ros` now monitors your ROS network and talks to every drums-daemon on the network, issues monitoring tasks automatically and aggregates the data and exports them to both ROS diagnostics and Graphite (TCP Port 2013)
 
 
 ### Quick sanity test
@@ -93,6 +93,6 @@ The logfile for drums-daemon (/tmp/drums-daemon.*) will be populated with new te
 
 Shows the data that is being sent to Graphite/Whisper
 
-   $ rosrun rqt_runtime_monitor rqt_runtime_monitor
+    $ rosrun rqt_runtime_monitor rqt_runtime_monitor
 
-Shows the same data as ROS diagnostics Key:Value pair
+Shows the same data as ROS diagnostics Key:Value pairs
