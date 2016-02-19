@@ -1,11 +1,11 @@
-My Setup: Ubuntu 14.04.3, ROS Indigo
+Tested setup: `Ubuntu 14.04.3`, `ROS Indigo`
 
-`drums-daemon`: runs on every host of your ROS-based infrastructure
-`drums_ros`: runs only on one machine (the aggregator machine)
+- `drums-daemon`: runs on every host of your ROS-based infrastructure
+- `drums_ros`: runs only on one machine (the aggregator machine)
 
 ## Setup and run drums-daemon locally (no system-wide installation for testing)
 
-For the ystem-wide installation guide, check [this guide](http://drums-project.github.io/drums_daemon.html#installation).
+For the system-wide installation guide, please check [this](http://drums-project.github.io/drums_daemon.html#installation).
 
 ```
 sudo apt-get install python-virtualenv python-pip libpcap-dev
